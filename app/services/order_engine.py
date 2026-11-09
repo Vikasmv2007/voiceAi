@@ -164,9 +164,11 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
                "cart": [{"quantity": l["quantity"], "name": l["name_en"]} for l in lines_before]}
     awaiting = st["awaiting"]
     if serving:
-        if serving.get("type"):
+        # Only a default: what the customer actually SAID ("takeaway", "table 5") wins,
+        # otherwise the web form would reset it on every turn.
+        if serving.get("type") and not st["serving"]["type"]:
             st["serving"]["type"] = serving["type"]
-        if serving.get("table"):
+        if serving.get("table") and not st["serving"]["table"] and st["serving"]["type"] != "takeaway":
             st["serving"]["table"] = serving["table"]
 
     # Did the customer say "takeaway" / "dine in" / "table 5"?
@@ -284,7 +286,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         # 5. If UPI, verify scanning / payment confirmation
         total = _save_total(db, order_id)
         if st.get("payment_mode") == "upi" and not st.get("upi_paid"):
-            if intent == "confirm":
+            if wants_checkout:              # "confirm" / "I have paid, place order" button
                 st["upi_paid"] = True
             else:
                 parts.append(say(lang, "pay_upi_qr", total=total))
@@ -317,27 +319,31 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
 
     wants_checkout = intent == "confirm" and mm.contains(mm.clean(text), nlu.PLACE_ORDER)
 
-    # State handler: awaiting name
-    if awaiting == "name":
-        extracted = nlu.extract_name(text)
-        if extracted and len(extracted) >= 2 and intent not in ("order", "menu", "cancel"):
-            st["customer_name"] = extracted
-            db.execute("UPDATE orders SET customer_name = ? WHERE id = ?", (extracted, order_id))
-            db.commit()
-            if st["ready"] or lines_before:
-                new_awaiting = try_place()
-            else:
-                parts.append(say(lang, "greet_named", name=extracted))
-                new_awaiting = None
-        elif intent == "order":
-            pass
-        elif intent == "cancel":
-            db.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", (order_id,))
-            db.commit()
-            parts.append(say(lang, "cancelled"))
+    # Is the customer telling us their name? ("my name is Ravi" at any time, or just "Ravi" when asked.)
+    name_answer = None
+    if not hit and not phone_hit and not pay_hit and intent in ("unknown", "greet"):
+        name_answer = nlu.explicit_name(text)
+        if not name_answer and awaiting == "name" and intent == "unknown":
+            name_answer = nlu.extract_name(text)
+        if name_answer and len(name_answer) < 2:
+            name_answer = None
+
+    # State handler: customer gave their name
+    if name_answer:
+        st["customer_name"] = name_answer
+        db.execute("UPDATE orders SET customer_name = ? WHERE id = ?", (name_answer, order_id))
+        db.commit()
+        if st["ready"]:
+            new_awaiting = try_place()      # we were collecting checkout details
         else:
-            parts.append(say(lang, "ask_name"))
-            new_awaiting = "name"
+            parts.append(say(lang, "greet_named", name=name_answer))
+            new_awaiting = awaiting if awaiting not in (None, "name") else None
+
+    # Asked for the name but got "yes" / "hello" / silence-like noise: ask again.
+    # (Orders, questions and cancel fall through to the normal handlers below.)
+    elif awaiting == "name" and intent in ("unknown", "greet", "confirm", "deny", "done"):
+        parts.append(say(lang, "ask_name"))
+        new_awaiting = "name"
 
     # State handler: awaiting phone
     elif awaiting == "phone":
@@ -363,8 +369,6 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             db.execute("UPDATE orders SET payment_mode = ? WHERE id = ?", (mode, order_id))
             db.commit()
             if mode == "cash":
-                total = _save_total(db, order_id)
-                parts.append(say(lang, "pay_cash_selected", total=total))
                 new_awaiting = try_place()
             else:  # upi
                 total = _save_total(db, order_id)
@@ -386,8 +390,6 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             st["payment_mode"] = "cash"
             db.execute("UPDATE orders SET payment_mode = 'cash' WHERE id = ?", (order_id,))
             db.commit()
-            total = _save_total(db, order_id)
-            parts.append(say(lang, "pay_cash_selected", total=total))
             new_awaiting = try_place()
         elif intent in ("confirm", "done") or "paid" in clean or "done" in clean or "success" in clean or "confirm" in clean:
             st["upi_paid"] = True
@@ -406,7 +408,9 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         if (st["ready"] and awaiting in ("where", "table")) or said_yes:
             new_awaiting = try_place()      # this was the missing detail
         else:
-            parts.append(say(lang, "note", note=serving_sentence().rstrip("。")))
+            parts.append(say(lang, "note", note=serving_sentence().rstrip("。.।")))
+            if awaiting == "name":
+                parts.append(say(lang, "ask_name"))
             new_awaiting = awaiting
 
     elif awaiting in ("where", "table") and intent in ("confirm", "deny", "unknown", "greet", "done"):
@@ -702,7 +706,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         st["awaiting"] = new_awaiting
         if new_awaiting not in ("where", "table", "name", "phone", "payment", "upi_confirm"):
             st["ready"] = False
-        if new_awaiting is not None and new_awaiting not in ("clarify"):
+        if new_awaiting is not None and new_awaiting not in ("clarify", "upsell"):
             st["pending"] = None
         if intent != "repeat":
             st["last_reply"] = reply
@@ -718,5 +722,6 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         "customer_name": st.get("customer_name"),
         "customer_phone": st.get("customer_phone"),
         "payment_mode": st.get("payment_mode"),
+        "serving": None if confirmed else dict(st["serving"]),
         "upi": upi_payload,
     }

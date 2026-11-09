@@ -1,5 +1,7 @@
-import os
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")   # Windows consoles cannot print ₹ otherwise
 
 from app import create_app
 from app.services import order_engine
@@ -58,5 +60,35 @@ with app.app_context():
     h2 = order_engine.handle_turn(sess3, "मेरा नाम विकास है", "hi-IN")
     assert h2["customer_name"] == "Vikas"
     print("Hindi flow passed!")
+
+    # --- Test 4: "yes" to the suggested drink adds it ---
+    s4 = str(uuid.uuid4())
+    print("\n=== Test 4: Upsell ===")
+    u1 = order_engine.handle_turn(s4, "one masala dosa", "en-IN")
+    assert u1["awaiting"] == "upsell"
+    u2 = order_engine.handle_turn(s4, "yes", "en-IN")
+    assert len(u2["cart"]["items"]) == 2, u2["reply"]
+    print("Upsell passed!")
+
+    # --- Test 5: an order said while we asked for the name is not lost ---
+    s5 = str(uuid.uuid4())
+    print("\n=== Test 5: Order during name question ===")
+    order_engine.handle_turn(s5, "hello", "en-IN")
+    n2 = order_engine.handle_turn(s5, "two idli", "en-IN")
+    assert n2["cart"]["items"] and n2["reply"], n2
+    assert n2["customer_name"] is None
+    print("Order during name question passed!")
+
+    # --- Test 6: spoken "takeaway" is not overwritten by the web form's default ---
+    s6 = str(uuid.uuid4())
+    print("\n=== Test 6: Spoken takeaway beats form default ===")
+    form = dict(customer_name="Ravi", serving={"type": "dine-in", "table": None})
+    for said in ("one idli", "no", "that's all", "yes", "takeaway"):
+        r = order_engine.handle_turn(s6, said, "en-IN", **form)
+    r = order_engine.handle_turn(s6, "9876543210", "en-IN", **form)
+    assert r["awaiting"] == "payment", r["reply"]
+    r = order_engine.handle_turn(s6, "upi", "en-IN", **form)
+    assert r["awaiting"] == "upi_confirm" and not r["confirmed"]
+    print("Takeaway passed!")
 
     print("\nALL TESTS PASSED!")

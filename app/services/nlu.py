@@ -221,9 +221,23 @@ NAME_MAP = {
     "अमित": "Amit",
 }
 
+# "I'm done", "I am ready" ... are not names.
+NOT_NAMES = {"done", "ready", "fine", "good", "ok", "okay", "finished", "hungry", "here", "back", "sorry",
+             "not sure", "thinking", "waiting", "full"}
+
 CASH_WORDS = ["cash", "nakad", "rokhad", "nagadu", "नकद", "ನಗದು", "pay cash", "by cash", "cash payment", "cash on delivery"]
 UPI_WORDS = ["upi", "qr", "qr code", "scanner", "scan", "online", "gpay", "google pay",
              "phonepe", "paytm", "bhim", "cashless", "क्यूआर", "यूपीआई", "ಯುಪಿಐ", "ಸ್ಕ್ಯಾನ್", "ಕ್ಯೂಆರ್"]
+
+
+def explicit_name(text):
+    """A name only when the customer clearly introduced it ("my name is Ravi", "I am Ravi")."""
+    t = text.strip()
+    if any(re.match(prefix, t, flags=re.IGNORECASE) for prefix in NAME_PREFIXES):
+        name = extract_name(t)
+        if name and name.lower() not in NOT_NAMES:
+            return name
+    return None
 
 
 def extract_name(text):
