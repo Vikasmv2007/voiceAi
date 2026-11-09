@@ -12,8 +12,7 @@ by Razorpay when it is set up.
 
 | For customers | For staff and owners |
 |---|---|
-| **Hands-free conversation**: tap the mic once, then just talk. The agent hears when you stop, replies, and listens again; talk over it to interrupt | Live kitchen board with sound and voice alerts |
-| Voice or typed ordering in 5 languages, switches language automatically | |
+| Voice or typed ordering in 5 languages, switches language automatically | Live kitchen board with sound and voice alerts |
 | Menu with photos, tap a dish to add it | Confirm payment (cash or UPI), then Preparing → Ready → Delivered |
 | Paid add-ons ("masala dosa with extra butter") | Kitchen tickets (KOT) for 80 mm thermal printers |
 | "What is pongal?" answers from the menu description | GST tax invoice (CGST + SGST, GSTIN, invoice number) |
