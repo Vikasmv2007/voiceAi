@@ -13,8 +13,7 @@ import requests
 from app import config
 
 INTENTS = {"order", "remove", "modify", "confirm", "deny", "done", "cancel", "total", "menu",
-           "price", "availability", "filter", "repeat", "greet", "note", "unknown"}
-CATEGORIES = {"Tiffin", "Sweets", "Meals", "Drinks"}
+           "price", "availability", "filter", "repeat", "greet", "note", "describe", "unknown"}
 
 AWAITING = {
     None: "nothing in particular",
@@ -52,11 +51,12 @@ Rules:
   For "make it 3" with no dish named, use intent modify, items [] and bare_quantity 3.
 - confirm = a clear yes. deny = a clear no. done = "that's all / nothing else". cancel = cancel the whole order.
 - price = asking the price of a dish. availability = asking if a dish is available. total = asking the bill.
+- describe = asking what a dish is, what is in it, or whether it is spicy.
 - If a word could mean several dishes (only "dosa"), put it in "ambiguous" with the candidate ids and
   keep it out of "items".
 - notes = special requests such as "no onion", "less spicy", "extra chutney" (item_id may be null).
 - filter (only for intent "filter", e.g. "anything vegetarian under 50?"):
-  {{"category": "Tiffin" | "Sweets" | "Meals" | "Drinks" | null, "max_price": number | null, "veg": true | false | null}}
+  {{"category": one of {categories} or null, "max_price": number | null, "veg": true | false | null}}
 - If you cannot understand, use intent "unknown".
 
 Examples:
@@ -112,6 +112,7 @@ def validate(data, menu):
     """Check everything the LLM said against the real menu. Returns the
     standard dictionary, or None if it cannot be trusted."""
     ids = {m["id"] for m in menu}
+    categories = {m["category"] for m in menu}
     intent = data.get("intent")
     if intent not in INTENTS:
         return None
@@ -138,13 +139,13 @@ def validate(data, menu):
     flt = data.get("filter")
     if isinstance(flt, dict):
         result["filter"] = {
-            "category": flt.get("category") if flt.get("category") in CATEGORIES else None,
+            "category": flt.get("category") if flt.get("category") in categories else None,
             "max_price": _whole(flt.get("max_price"), 1, 5000),
             "veg": flt.get("veg") if isinstance(flt.get("veg"), bool) else None,
             "cheap": False,
         }
     # An intent that needs dishes but has none is useless: let the rules try instead.
-    if intent in ("order", "remove", "price", "availability") and not (result["items"] or result["ambiguous"]):
+    if intent in ("order", "remove", "price", "availability", "describe") and not (result["items"] or result["ambiguous"]):
         return None
     if intent == "filter" and not result["filter"]:
         return None
@@ -156,7 +157,8 @@ def validate(data, menu):
 def parse_with_llm(text, menu, lang, context):
     """Ask the LLM. Returns the standard dictionary, or None on ANY problem."""
     try:
-        system = PROMPT.format(menu=_menu_text(menu), cart=_cart_text(context.get("cart", [])),
+        categories = " | ".join(json.dumps(c) for c in sorted({m["category"] for m in menu}))
+        system = PROMPT.format(menu=_menu_text(menu), categories=categories, cart=_cart_text(context.get("cart", [])),
                                awaiting=AWAITING.get(context.get("awaiting"), "nothing in particular"))
         body = {"model": config.LLM_MODEL, "temperature": 0, "max_tokens": 500,
                 "messages": [{"role": "system", "content": system},

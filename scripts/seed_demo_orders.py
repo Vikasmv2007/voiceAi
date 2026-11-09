@@ -44,7 +44,7 @@ for days_ago in range(6, -1, -1):
             total += qty * m["price"]
             con.execute("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price) VALUES (?, ?, ?, ?)",
                         (cur.lastrowid, m["id"], qty, m["price"]))
-        con.execute("UPDATE orders SET total = ? WHERE id = ?", (total, cur.lastrowid))
+        con.execute("UPDATE orders SET subtotal = ?, total = ? WHERE id = ?", (total, total, cur.lastrowid))
         count += 1
 con.commit()
 con.close()

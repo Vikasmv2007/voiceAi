@@ -29,6 +29,10 @@ const submitCashBtn = document.getElementById("submitCashBtn");
 
 let currentPaymentMode = "upi";
 let qrInstance = null;
+const gatewayQr = document.getElementById("gatewayQr");
+const taxLine = document.getElementById("taxLine");
+const orderBox = document.getElementById("orderBox");
+let paymentPoll = null;          // Razorpay QR on screen: ask the server whether the money arrived
 
 function newSessionId() {
   return (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random();
@@ -143,6 +147,7 @@ function watchOrder(id, initialStatus) {
       const d = await res.json();
       if (d.status === last) return;
       last = d.status;
+      renderOrderBox(id, d);
       if (d.status === "CONFIRMED") {
         showBanner("✅ " + (d.message || ("Order #" + id + " confirmed by kitchen!")));
         chime(1);
@@ -162,13 +167,13 @@ function watchOrder(id, initialStatus) {
         alarmTimer = setInterval(ring, 12000);
       }
       if (d.status === "CANCELLED") { showBanner("⚠ " + d.message, "bad"); chime(1); speak(d.message); }
-      if (["READY", "DELIVERED", "CANCELLED"].includes(d.status)) { clearInterval(timer); remember(false); }
+      if (["DELIVERED", "CANCELLED"].includes(d.status)) { clearInterval(timer); remember(false); }
     } catch (e) { /* offline for a moment: try again next time */ }
   }, 4000);
 }
 
 // If the customer closed the page and came back, keep watching their order.
-try { JSON.parse(localStorage.getItem("watching") || "[]").forEach(watchOrder); } catch (e) { /* ignore */ }
+try { JSON.parse(localStorage.getItem("watching") || "[]").forEach((id) => watchOrder(id)); } catch (e) { /* ignore */ }
 
 // ---- Step 5: the agent speaks ----
 const speakBox = document.getElementById("speakBox");
@@ -349,6 +354,10 @@ async function sendTurn(text, overridePayment) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Something went wrong");
 
+  // The agent noticed another language (e.g. Tamil typed while English was selected): follow it.
+  if (data.language && data.language !== langSel.value && langSel.querySelector('option[value="' + data.language + '"]')) {
+    langSel.value = data.language;
+  }
   replyEl.textContent = data.reply;
   renderCart(data.cart);
   speak(data.reply);
@@ -375,16 +384,25 @@ async function sendTurn(text, overridePayment) {
   // Update QR scanner display if cart has items
   renderPayment(data);
 
-  if (data.confirmed) {
-    if (data.payment_mode === "cash") {
+  // The customer can only SUBMIT. The staff confirm the order on the dashboard after
+  // checking the payment; watchOrder() tells the customer when that happens.
+  if (data.submitted) {
+    stopPaymentPoll();
+    rememberOrder(data.order_id, sessionId);
+    if (data.status === "CONFIRMED") {          // paid online and verified by Razorpay
+      statusEl.textContent = "Order #" + data.order_id + " confirmed ✅ (paid online)";
+      showBanner("✅ Order #" + data.order_id + " confirmed. Payment received.");
+    } else if (data.status === "AWAITING_CASH") {
       statusEl.textContent = "Order #" + data.order_id + " submitted ⏳ Awaiting Cash Payment";
-      showBanner("⏳ Order #" + data.order_id + " submitted. Please pay cash to staff. Kitchen will confirm upon payment.", "cash");
-      watchOrder(data.order_id, "AWAITING_CASH");
+      showBanner("⏳ Order #" + data.order_id + " submitted. Please pay ₹" + data.cart.total +
+                 " cash to the staff. Your order is confirmed only after the staff collect it.", "cash");
     } else {
-      statusEl.textContent = "Order #" + data.order_id + " confirmed ✅";
-      showBanner("✅ Order #" + data.order_id + " confirmed (" + (data.payment_mode ? data.payment_mode.toUpperCase() : "PAID") + ")");
-      watchOrder(data.order_id, "CONFIRMED");
+      statusEl.textContent = "Order #" + data.order_id + " submitted ⏳ Staff are checking your UPI payment";
+      showBanner("⏳ Order #" + data.order_id + " submitted. The staff are checking your UPI payment of ₹" +
+                 data.cart.total + ". Your order is confirmed only after they see it.", "cash");
     }
+    watchOrder(data.order_id, data.status);
+    renderOrderBox(data.order_id, { status: data.status });
     chime(1);
     if (paymentSection) paymentSection.hidden = true;
     sessionId = newSessionId(); // the next order starts fresh
@@ -399,8 +417,18 @@ function renderCart(cart) {
   cart.items.forEach((it) => {
     const li = document.createElement("li");
     li.textContent = it.quantity + " × " + it.name + " — ₹" + it.line_total + (it.notes ? " (" + it.notes + ")" : "");
+    if (it.addons) {
+      const a = document.createElement("div");
+      a.className = "addon";
+      a.textContent = "+ " + it.addons;
+      li.appendChild(a);
+    }
     cartEl.appendChild(li);
   });
+  if (taxLine) {
+    taxLine.hidden = !(cart.items.length && cart.tax);
+    taxLine.textContent = "Subtotal ₹" + cart.subtotal + " + GST " + cart.gst_rate + "% ₹" + cart.tax;
+  }
   totalEl.textContent = cart.items.length ? "Total: ₹" + cart.total : "Your order is empty";
 }
 
@@ -423,7 +451,7 @@ if (payCashBtn) {
 function renderPayment(data) {
   if (!paymentSection) return;
   const hasItems = data.cart && data.cart.items && data.cart.items.length > 0;
-  if (!hasItems || data.confirmed) {
+  if (!hasItems || data.submitted) {
     paymentSection.hidden = true;
     return;
   }
@@ -435,7 +463,17 @@ function renderPayment(data) {
     cashHint.textContent = "Please pay \u20b9" + data.cart.total + " cash to the staff. The kitchen will confirm your order after collecting payment.";
   }
 
-  if (data.upi && qrcodeBox) {
+  if (gatewayQr) gatewayQr.hidden = true;
+  if (data.upi && data.upi.gateway) {
+    // Razorpay one-time QR for the exact amount: confirmed automatically when the money arrives.
+    if (qrcodeBox) qrcodeBox.replaceChildren();
+    gatewayQr.src = data.upi.image_url;
+    gatewayQr.hidden = false;
+    if (upiDetails) upiDetails.textContent = "Amount: ₹" + data.upi.amount + " · confirmed automatically after payment";
+    if (upiPayLink) upiPayLink.style.display = "none";
+    startPaymentPoll(data.upi.order_id);
+  } else if (data.upi && qrcodeBox) {
+    stopPaymentPoll();
     qrcodeBox.replaceChildren();
     if (window.QRCode) {
       new QRCode(qrcodeBox, {
@@ -456,18 +494,138 @@ function renderPayment(data) {
     }
   }
 
-  // Everything is collected and paid: the order was read back and needs one
-  // last explicit "yes" before it goes to the kitchen.
-  const finalStep = data.awaiting === "final_confirm";
-  if (confirmUpiBtn) confirmUpiBtn.textContent = finalStep ? "\u2705 Yes, Place My Order" : "\u2705 I Have Paid \u00b7 Place Order";
-  if (submitCashBtn) submitCashBtn.textContent = finalStep ? "\u2705 Yes, Place My Order" : "\ud83d\udce8 Submit Order (Pay Cash to Staff)";
-  if (qrcodeBox) qrcodeBox.hidden = finalStep;
-  if (finalStep) {
-    if (upiDetails) upiDetails.textContent = "Payment received \u2705 Confirm your order below.";
-    if (upiPayLink) upiPayLink.style.display = "none";
-    if (cashHint) cashHint.textContent = "Confirm your order below. The kitchen starts only after you say yes.";
+}
+
+function startPaymentPoll(orderId) {
+  if (paymentPoll && paymentPoll.orderId === orderId) return;
+  stopPaymentPoll();
+  let tries = 0;
+  const timer = setInterval(async () => {
+    if (++tries > 400) { stopPaymentPoll(); return; }          // about 20 minutes
+    try {
+      const r = await fetch("/api/orders/" + orderId + "/payment");
+      const d = await r.json();
+      if (d.paid) { stopPaymentPoll(); sendTurn("paid"); }
+    } catch (e) { /* try again */ }
+  }, 3000);
+  paymentPoll = { orderId, timer };
+}
+
+function stopPaymentPoll() {
+  if (paymentPoll) clearInterval(paymentPoll.timer);
+  paymentPoll = null;
+}
+
+// ---- After the order is sent: cancel (before the staff confirm) and rating (after it is served) ----
+function orderSessions() {
+  try { return JSON.parse(localStorage.getItem("orderSessions") || "{}"); } catch (e) { return window._orderSessions || {}; }
+}
+function rememberOrder(id, sid) {
+  const all = orderSessions();
+  all[id] = sid;
+  window._orderSessions = all;
+  try { localStorage.setItem("orderSessions", JSON.stringify(all)); } catch (e) { /* ignore */ }
+}
+
+async function customerPost(id, path, body) {
+  const res = await fetch("/api/orders/" + id + "/" + path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ session_id: orderSessions()[id] }, body || {})),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Something went wrong");
+  return data;
+}
+
+function renderOrderBox(id, d) {
+  if (!orderBox || !orderSessions()[id]) return;
+  const make = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
+  orderBox.replaceChildren();
+  orderBox.hidden = true;
+  if (d.status === "AWAITING_CASH" || d.status === "AWAITING_UPI") {
+    if (d.paid_online) return;
+    const btn = make("button", "✖ Cancel order #" + id, "btn-cancel");
+    btn.addEventListener("click", async () => {
+      if (!confirm("Cancel order #" + id + "?")) return;
+      try {
+        await customerPost(id, "customer-cancel");
+        showBanner("Order #" + id + " cancelled.", "bad");
+        orderBox.hidden = true;
+      } catch (e) { alert(e.message); }
+    });
+    orderBox.append(make("p", "Changed your mind? You can cancel until the staff confirm your payment."), btn);
+    orderBox.hidden = false;
+  } else if ((d.status === "READY" || d.status === "DELIVERED") && !d.rated) {
+    let rating = 0;
+    const stars = make("div", "", "stars");
+    for (let i = 1; i <= 5; i++) {
+      const b = make("button", "★");
+      b.type = "button";
+      b.setAttribute("aria-label", i + " stars");
+      b.addEventListener("click", () => { rating = i; [...stars.children].forEach((c, j) => c.classList.toggle("on", j < i)); });
+      stars.append(b);
+    }
+    const comment = make("textarea");
+    comment.placeholder = "Anything to tell the kitchen? (optional)";
+    comment.maxLength = 300;
+    const send = make("button", "Send feedback", "btn-action");
+    send.addEventListener("click", async () => {
+      if (!rating) { alert("Tap the stars first"); return; }
+      try {
+        await customerPost(id, "feedback", { rating, comment: comment.value });
+        orderBox.replaceChildren(make("p", "🙏 Thank you for your feedback!"));
+      } catch (e) { alert(e.message); }
+    });
+    orderBox.append(make("p", "How was order #" + id + "?"), stars, comment, send);
+    orderBox.hidden = false;
   }
 }
+
+// ---- The menu with photos: tap a dish to add one ----
+async function loadCustomerMenu() {
+  const list = document.getElementById("menuList");
+  if (!list) return;
+  try {
+    const items = await (await fetch("/api/menu")).json();
+    const nameKey = { "hi-IN": "name_hi", "kn-IN": "name_kn", "ta-IN": "name_ta", "te-IN": "name_te" };
+    list.replaceChildren();
+    let cat = null;
+    for (const it of items) {
+      if (it.category !== cat) {
+        cat = it.category;
+        const h = document.createElement("p");
+        h.className = "menu-cat";
+        h.textContent = cat;
+        list.append(h);
+      }
+      const shown = it[nameKey[langSel.value]] || it.name_en;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dish";
+      b.disabled = !it.available;
+      const pic = it.image_url ? Object.assign(document.createElement("img"), { src: it.image_url, alt: "" })
+                               : Object.assign(document.createElement("span"), { className: "ph", textContent: "🍽" });
+      const mid = document.createElement("span");
+      const nm = document.createElement("div");
+      nm.className = "d-name";
+      const dot = document.createElement("span");
+      dot.className = "veg-dot " + (it.veg ? "veg" : "nonveg");
+      nm.append(dot, shown + (it.available ? "" : " (sold out)"));
+      const ds = document.createElement("div");
+      ds.className = "d-desc";
+      ds.textContent = it.description || "";
+      mid.append(nm, ds);
+      const pr = document.createElement("span");
+      pr.className = "d-price";
+      pr.textContent = "₹" + it.price;
+      b.append(pic, mid, pr);
+      b.addEventListener("click", () => sendTurn("one " + it.name_en).catch((e) => { statusEl.textContent = e.message; }));
+      list.append(b);
+    }
+  } catch (e) { /* the menu list is optional */ }
+}
+loadCustomerMenu();
+langSel.addEventListener("change", loadCustomerMenu);
 
 if (confirmUpiBtn) {
   confirmUpiBtn.addEventListener("click", () => {

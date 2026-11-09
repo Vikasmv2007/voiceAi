@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Table QR Codes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 20px; background: #f4f1ea; color: #1b1b1b; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 18px; }
+    label { display: flex; flex-direction: column; font-size: .85rem; gap: 4px; }
+    input { padding: 8px; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; }
+    button { padding: 10px 16px; font-size: 1rem; border: none; border-radius: 8px; background: #2d6a4f; color: #fff; cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+    .tag { background: #fff; border: 2px dashed #bbb; border-radius: 14px; padding: 16px; text-align: center; break-inside: avoid; }
+    .tag h2 { margin: 0 0 4px; font-size: 1.5rem; }
+    .tag p { margin: 4px 0; font-size: .9rem; color: #444; }
+    .tag .qr { display: flex; justify-content: center; margin: 10px 0; }
+    .hint { color: #666; font-size: .9rem; }
+    @media print { .controls, .hint { display: none; } body { background: #fff; padding: 0; } .tag { border-color: #000; } }
+  </style>
+</head>
+<body>
+  <h1>🔳 Table QR codes · {{ restaurant }}</h1>
+  <p class="hint">Print and stick one on each table. Scanning opens the ordering page with the table number
+    already filled in, so the order goes straight to the right table.</p>
+  <div class="controls">
+    <label>Website address<input id="base" size="34" value="{{ base }}"></label>
+    <label>First table<input id="from" type="number" min="1" max="99" value="1"></label>
+    <label>Last table<input id="to" type="number" min="1" max="99" value="10"></label>
+    <button id="make">Make QR codes</button>
+    <button onclick="window.print()">🖨 Print</button>
+  </div>
+  <div id="grid" class="grid"></div>
+  <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+  <script>
+    const baseInput = document.getElementById("base");
+    if (!baseInput.value) baseInput.value = location.origin;
+    function make() {
+      const grid = document.getElementById("grid");
+      grid.replaceChildren();
+      const base = baseInput.value.replace(/\/+$/, "");
+      const from = Math.max(1, Math.min(99, +document.getElementById("from").value || 1));
+      const to = Math.max(from, Math.min(99, +document.getElementById("to").value || from));
+      for (let t = from; t <= to; t++) {
+        const url = base + "/?table=" + t;
+        const tag = document.createElement("div");
+        tag.className = "tag";
+        const h = document.createElement("h2"); h.textContent = "Table " + t;
+        const qr = document.createElement("div"); qr.className = "qr";
+        const p1 = document.createElement("p"); p1.textContent = "Scan to order by voice";
+        const p2 = document.createElement("p"); p2.textContent = "English · हिन्दी · ಕನ್ನಡ · தமிழ் · తెలుగు";
+        tag.append(h, qr, p1, p2);
+        grid.append(tag);
+        new QRCode(qr, { text: url, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
+      }
+    }
+    document.getElementById("make").addEventListener("click", make);
+    make();
+  </script>
+</body>
+</html>

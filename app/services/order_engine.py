@@ -1,30 +1,59 @@
 """The order brain: keeps the cart, follows the rules, decides the reply.
 
 Golden rule: an order stays DRAFT until the customer says an explicit "yes"
-AFTER hearing the read-back and completing serving/payment steps. Only then
-it becomes CONFIRMED (and will show on the kitchen dashboard). Prices ALWAYS
-come from the database.
+AFTER hearing the read-back and completing serving/payment steps. It is then
+SUBMITTED as AWAITING_CASH or AWAITING_UPI. The customer can never confirm it:
+only the staff, on the dashboard, after they have the money (cash in hand, or
+the UPI payment seen in their UPI app), moves it to CONFIRMED and the kitchen
+starts. Prices ALWAYS come from the database.
 """
+import json
 import urllib.parse
 from app import config
 from app.db import get_db
 from app.services import menu_matcher as mm
-from app.services import nlu
-from app.services.texts import join_list, say
+from app.services import kitchen, nlu, payments, pricing
+from app.services.texts import LANGS, join_list, say
 
 MAX_QTY = 20
+# Things a customer may say at ANY step (even while we wait for their phone number or payment):
+# they go to the normal handlers instead of being treated as a wrong answer.
+ORDER_TALK = {"order", "modify", "remove", "addon", "total", "menu", "price", "availability", "describe",
+              "filter", "repeat", "note"}
 
-# Remembers what the agent just asked each customer (kept in memory).
+# Remembers what the agent just asked each customer. Saved in the "sessions" table,
+# so a server restart (or several server workers) does not lose a half-finished order.
 #   awaiting: None | "more" | "confirm" | "clarify" | "upsell" | "where" | "table" | "name" | "phone" | "payment" | "upi_confirm"
 #   serving:  dine-in / takeaway and table number, once the customer has told us
 #   ready:    True only AFTER the customer said "yes" and we are collecting final details (where/table/name/phone/payment)
-SESSIONS = {}
+def _new_state():
+    return {"awaiting": None, "pending": None, "last_item": None, "last_reply": "", "upsold": False,
+            "serving": {"type": None, "table": None}, "ready": False,
+            "customer_name": None, "customer_phone": None, "payment_mode": None, "upi_paid": False}
 
-def _state(session_id):
-    return SESSIONS.setdefault(session_id, {
-        "awaiting": None, "pending": None, "last_item": None, "last_reply": "", "upsold": False,
-        "serving": {"type": None, "table": None}, "ready": False,
-        "customer_name": None, "customer_phone": None, "payment_mode": None, "upi_paid": False})
+
+def _load_state(db, session_id):
+    row = db.execute("SELECT state FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
+    st = _new_state()
+    if row:
+        try:
+            st.update(json.loads(row["state"]))
+        except ValueError:
+            pass
+    return st
+
+
+def _save_state(db, session_id, st):
+    db.execute("INSERT INTO sessions (session_id, state, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)"
+               " ON CONFLICT(session_id) DO UPDATE SET state = excluded.state, updated_at = CURRENT_TIMESTAMP",
+               (session_id, json.dumps(st, ensure_ascii=False)))
+    db.execute("DELETE FROM sessions WHERE updated_at < datetime('now', '-1 day')")   # forget abandoned chats
+    db.commit()
+
+
+def _drop_state(db, session_id):
+    db.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+    db.commit()
 
 
 # ---------- small database helpers ----------
@@ -43,30 +72,36 @@ def _draft_order_id(db, session_id, language, customer_id=None, channel="web"):
 
 def _lines(db, order_id):
     rows = db.execute(
-        "SELECT oi.id AS line_id, oi.menu_item_id, oi.quantity, oi.unit_price, oi.notes,"
-        " m.name_en, m.name_kn, m.name_hi"
+        "SELECT oi.id AS line_id, oi.menu_item_id, oi.quantity, oi.unit_price, oi.notes, oi.addons,"
+        " m.name_en, m.name_kn, m.name_hi, m.name_ta, m.name_te"
         " FROM order_items oi JOIN menu_items m ON m.id = oi.menu_item_id"
         " WHERE oi.order_id = ? ORDER BY oi.id", (order_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def _total(lines):
+def _subtotal(lines):
     return sum(l["quantity"] * l["unit_price"] for l in lines)
 
 
+def _total(lines):
+    "What the customer pays: dishes + GST."
+    return pricing.breakdown(_subtotal(lines))["total"]
+
+
 def _save_total(db, order_id):
-    total = _total(_lines(db, order_id))
-    db.execute("UPDATE orders SET total = ? WHERE id = ?", (total, order_id))
+    b = pricing.breakdown(_subtotal(_lines(db, order_id)))
+    db.execute("UPDATE orders SET subtotal = ?, tax = ?, total = ? WHERE id = ?",
+               (b["subtotal"], b["tax"], b["total"], order_id))
     db.commit()
-    return total
+    return b["total"]
 
 
 def _name(row, lang):
     "Dish name in the customer's language (falls back to English)."
     if lang == "hi" and row.get("name_hi"):
         return row["name_hi"]
-    if lang == "kn" and row.get("name_kn"):
-        return row["name_kn"]
+    if lang in ("kn", "ta", "te") and row.get("name_" + lang):
+        return row["name_" + lang]
     return row["name_en"]
 
 
@@ -76,7 +111,8 @@ def _phrase(pairs, lang):
 
 
 def _cart_phrase(lines, lang):
-    return _phrase([(l, l["quantity"]) for l in lines], lang)
+    return join_list(lang, [f'{l["quantity"]} {_name(l, lang)}' + (f' (+ {l["addons"]})' if l.get("addons") else "")
+                            for l in lines])
 
 
 def _find_line(lines, item_id):
@@ -93,6 +129,27 @@ def _add(db, order_id, item, qty, note=""):
         db.execute("INSERT INTO order_items (order_id, menu_item_id, quantity, unit_price, notes)"
                    " VALUES (?, ?, ?, ?, ?)", (order_id, item["id"], qty, item["price"], note))
     db.commit()
+
+
+def _apply_addons(db, order_id, addons, fallback_item_id):
+    """Paid add-ons ("extra cheese") go on the dish's line and raise its unit price.
+    Returns [(line, [names added])]. Prices come from the menu, never from what was said."""
+    done = {}
+    for a in addons:
+        target = a["item_id"] or fallback_item_id
+        if target != a["menu_item_id"]:          # this add-on is not offered for that dish
+            continue
+        line = _find_line(_lines(db, order_id), target)
+        if not line:
+            continue
+        have = [x.strip() for x in (line["addons"] or "").split(",") if x.strip()]
+        if a["name"] in have:
+            continue
+        db.execute("UPDATE order_items SET addons = ?, unit_price = unit_price + ? WHERE id = ?",
+                   (", ".join(have + [a["name"]]), a["price"], line["line_id"]))
+        done.setdefault(line["line_id"], (line, []))[1].append(a["name"])
+    db.commit()
+    return list(done.values())
 
 
 def _attach_notes(db, order_id, notes, fallback_item_id):
@@ -124,6 +181,27 @@ def _pick_upsell(db, menu, lines):
     return by_id[row["id"]] if row else None
 
 
+def _paid_online(db, order_id, total):
+    """True when Razorpay reported a payment of at least this amount for this order."""
+    row = db.execute("SELECT payment_ref, total FROM orders WHERE id = ?", (order_id,)).fetchone()
+    return bool(row and row["payment_ref"] and row["total"] == total)
+
+
+def _gateway_qr(db, order_id, total, st):
+    """Make (or reuse) a Razorpay one-time QR for exactly `total`. Returns False if Razorpay failed."""
+    if st.get("qr_amount") == total and st.get("qr_image"):
+        return True
+    try:
+        qr = payments.create_qr(order_id, total)
+    except payments.PaymentError as e:
+        print(f"[payments] {e}")
+        return False
+    db.execute("UPDATE orders SET gateway_qr_id = ? WHERE id = ?", (qr["id"], order_id))
+    db.commit()
+    st["qr_amount"], st["qr_image"] = total, qr["image_url"]
+    return True
+
+
 def _alternatives(menu, item, lang):
     same = [m for m in menu if m["category"] == item["category"] and m["available"] and m["id"] != item["id"]]
     if not same:
@@ -137,12 +215,17 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
     "customer_id: who is ordering (browser id or phone number) - used for 'same as last time'."
     "serving: optional {\"type\": \"dine-in\"|\"takeaway\", \"table\": \"5\"} already known (QR code / phone call)."
     lang = (language_code or "en").split("-")[0]
-    if lang not in ("en", "hi", "kn"):
+    if lang not in LANGS:
         lang = "en"
+    # Typed or heard in another script (e.g. Tamil while "English" is selected)? Reply in that language.
+    seen = nlu.detect_language(text)
+    if seen and seen != lang:
+        lang, language_code = seen, seen + "-IN"
     db = get_db()
-    menu = [dict(r) for r in db.execute("SELECT * FROM menu_items ORDER BY id")]
-    by_id = {m["id"]: m for m in menu}
-    st = _state(session_id)
+    all_items = [dict(r) for r in db.execute("SELECT * FROM menu_items ORDER BY id")]
+    by_id = {m["id"]: m for m in all_items}                      # includes removed dishes (old carts)
+    menu = [m for m in all_items if m.get("active", 1)]          # what the customer can order
+    st = _load_state(db, session_id)
     order_id = _draft_order_id(db, session_id, language_code, customer_id, channel)
     lines_before = _lines(db, order_id)
 
@@ -201,7 +284,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
     else:
         parsed = nlu.parse(text, menu, lang, context)
     intent = parsed["intent"]
-    confirmed = False
+    submitted = None        # "AWAITING_CASH" / "AWAITING_UPI" once the order is handed to the staff
 
     # The customer is answering "which one?" -> reuse the quantity they gave before.
     if awaiting == "clarify" and st.get("pending") and intent == "order":
@@ -236,21 +319,28 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
 
 
     def try_place():
-        nonlocal confirmed
+        nonlocal submitted
         lines_now = _lines(db, order_id)
         if not lines_now:
             parts.append(say(lang, "empty_ask"))
             return None
 
-        gone = []
+        gone, cut = [], []
         for l in lines_now:                     # last safety check: is everything still in stock?
-            if not by_id[l["menu_item_id"]]["available"]:
+            item = by_id[l["menu_item_id"]]
+            stock = item.get("stock")
+            if not item["available"] or (stock is not None and stock <= 0):
                 gone.append(l)
                 db.execute("DELETE FROM order_items WHERE id = ?", (l["line_id"],))
+            elif stock is not None and l["quantity"] > stock:
+                cut.append((l, stock))
+                db.execute("UPDATE order_items SET quantity = ? WHERE id = ?", (stock, l["line_id"]))
         db.commit()
-        if gone:
+        if gone or cut:
             for l in gone:
                 parts.append(say(lang, "stock_removed", name=_name(l, lang)))
+            for l, left in cut:
+                parts.append(say(lang, "stock_left", left=left, name=_name(l, lang)))
             _save_total(db, order_id)
             if _lines(db, order_id):
                 parts.append(read_back())
@@ -285,36 +375,59 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
 
         # 5. If UPI, verify scanning / payment confirmation
         total = _save_total(db, order_id)
+        paid_online = _paid_online(db, order_id, total)
+        link_sent = False
         if st.get("payment_mode") == "upi" and not st.get("upi_paid"):
-            if wants_checkout:              # "confirm" / "I have paid, place order" button
+            if paid_online:                 # Razorpay already told us the money arrived
+                st["upi_paid"] = True
+            elif payments.enabled() and channel == "phone":
+                # A caller cannot scan a screen: Razorpay texts them a payment link.
+                try:
+                    link = payments.create_payment_link(order_id, total, st.get("customer_phone"), st.get("customer_name"))
+                    db.execute("UPDATE orders SET gateway_qr_id = ? WHERE id = ?", (link["id"], order_id))
+                    link_sent = True
+                except payments.PaymentError as e:
+                    print(f"[payments] {e}")
+                    st["payment_mode"] = "cash"         # fall back: pay at pickup, staff confirm
+            elif payments.enabled():
+                if not _gateway_qr(db, order_id, total, st):
+                    st["payment_mode"] = "cash"         # Razorpay down: never block the order
+                    parts.append(say(lang, "pay_cash_selected", total=total))
+                else:
+                    parts.append(say(lang, "upi_waiting_gateway" if st.get("upi_said_paid") else "pay_upi_auto",
+                                     total=total))
+                    st["ready"] = True
+                    return "upi_confirm"
+            elif wants_checkout:            # "confirm" / "I have paid, place order" button
                 st["upi_paid"] = True
             else:
                 parts.append(say(lang, "pay_upi_qr", total=total))
                 st["ready"] = True
                 return "upi_confirm"
 
-        # All requirements satisfied. Place the order now.
-        # Cash orders go to AWAITING_CASH (no confirmed_at) so the kitchen must
-        # collect cash and click "Cash Collected" before they start preparing.
-        # UPI orders are confirmed immediately — payment was already received.
+        # All details collected: SUBMIT the order. It is NOT confirmed yet and the
+        # kitchen does not start: confirmed_at stays empty until the staff check the
+        # payment on the dashboard ("Cash Collected" / "UPI Payment Received").
         sv = st["serving"]
         is_cash = st.get("payment_mode") == "cash"
-        if is_cash:
-            db.execute("UPDATE orders SET status = 'AWAITING_CASH', language = ?, order_type = ?, table_no = ?,"
-                       " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
-                       " payment_mode = ? WHERE id = ?",
-                       (language_code, sv["type"], sv["table"], customer_id, channel,
-                        st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
-            parts.append(say(lang, "cash_submitted", id=order_id, total=total) + " " + serving_sentence())
-        else:
-            db.execute("UPDATE orders SET status = 'CONFIRMED', language = ?, order_type = ?, table_no = ?,"
-                       " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
-                       " payment_mode = ?, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                       (language_code, sv["type"], sv["table"], customer_id, channel,
-                        st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
-            parts.append(say(lang, "confirmed", id=order_id, total=total) + " " + serving_sentence())
+        status = "AWAITING_CASH" if is_cash else "AWAITING_UPI"
+        db.execute("UPDATE orders SET status = ?, language = ?, order_type = ?, table_no = ?,"
+                   " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
+                   " payment_mode = ? WHERE id = ?",
+                   (status, language_code, sv["type"], sv["table"], customer_id, channel,
+                    st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
         db.commit()
-        confirmed = True
+        if paid_online and not is_cash:
+            # Verified by Razorpay (not by the customer): confirmed straight away.
+            kitchen.change_status(db, order_id, "CONFIRMED", by="Razorpay")
+            status = "CONFIRMED"
+            key = "gateway_confirmed"
+        elif link_sent:
+            key = "pay_link_sent"
+        else:
+            key = "cash_submitted" if is_cash else "upi_submitted"
+        parts.append(say(lang, key, id=order_id, total=total) + " " + serving_sentence())
+        submitted = status
         return None
 
     wants_checkout = intent == "confirm" and mm.contains(mm.clean(text), nlu.PLACE_ORDER)
@@ -346,8 +459,9 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         new_awaiting = "name"
 
     # State handler: awaiting phone
-    elif awaiting == "phone":
-        phone = nlu.detect_phone(text, lang)
+    elif awaiting == "phone" and intent not in ORDER_TALK:
+        # Said it, or typed it into the phone box on the page (sent along as customer_phone).
+        phone = nlu.detect_phone(text, lang) or (st.get("customer_phone") if intent != "cancel" else None)
         if phone:
             st["customer_phone"] = phone
             db.execute("UPDATE orders SET customer_phone = ? WHERE id = ?", (phone, order_id))
@@ -362,19 +476,13 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             new_awaiting = "phone"
 
     # State handler: awaiting payment selection
-    elif awaiting == "payment":
+    elif awaiting == "payment" and intent not in ORDER_TALK:
         mode = nlu.detect_payment(text)
         if mode:
             st["payment_mode"] = mode
             db.execute("UPDATE orders SET payment_mode = ? WHERE id = ?", (mode, order_id))
             db.commit()
-            if mode == "cash":
-                new_awaiting = try_place()
-            else:  # upi
-                total = _save_total(db, order_id)
-                parts.append(say(lang, "pay_upi_qr", total=total))
-                st["ready"] = True
-                new_awaiting = "upi_confirm"
+            new_awaiting = try_place()      # cash: submit; UPI: show the QR (Razorpay or plain)
         elif intent == "cancel":
             db.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", (order_id,))
             db.commit()
@@ -384,24 +492,25 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             new_awaiting = "payment"
 
     # State handler: awaiting UPI payment confirmation
-    elif awaiting == "upi_confirm":
+    elif awaiting == "upi_confirm" and intent not in ORDER_TALK:
         clean = mm.clean(text)
         if nlu.detect_payment(text) == "cash":
             st["payment_mode"] = "cash"
             db.execute("UPDATE orders SET payment_mode = 'cash' WHERE id = ?", (order_id,))
             db.commit()
             new_awaiting = try_place()
-        elif intent in ("confirm", "done") or "paid" in clean or "done" in clean or "success" in clean or "confirm" in clean:
-            st["upi_paid"] = True
-            new_awaiting = try_place()
         elif intent == "cancel":
             db.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", (order_id,))
             db.commit()
             parts.append(say(lang, "cancelled"))
+        elif intent in ("confirm", "done") or any(w in clean for w in ("paid", "done", "success", "confirm")):
+            if payments.enabled():
+                st["upi_said_paid"] = True      # Razorpay decides, not the customer
+            else:
+                st["upi_paid"] = True           # goes to AWAITING_UPI: staff check it
+            new_awaiting = try_place()
         else:
-            total = _save_total(db, order_id)
-            parts.append(say(lang, "pay_upi_qr", total=total))
-            new_awaiting = "upi_confirm"
+            new_awaiting = try_place()          # shows the QR / payment request again
 
     elif intent == "serving":
         said_yes = awaiting == "confirm" and rules_intent == "confirm"      # "yes, takeaway"
@@ -466,8 +575,13 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             item = by_id[it["item_id"]]
             qty = it["quantity"]
             line = _find_line(_lines(db, order_id), item["id"])
-            if not item["available"]:
+            stock = item.get("stock")
+            if not item["available"] or not item.get("active", 1) or (stock is not None and stock <= 0):
                 problems.append(say(lang, "unavailable", name=_name(item, lang)) + _alternatives(menu, item, lang))
+                continue
+            wanted = qty if intent == "modify" and line else (line["quantity"] if line else 0) + qty
+            if stock is not None and wanted > stock:
+                problems.append(say(lang, "stock_left", left=stock, name=_name(item, lang)))
                 continue
             if intent == "modify" and line:
                 if qty > MAX_QTY:
@@ -484,6 +598,8 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
                 added.append((item, qty))
             st["last_item"] = item["id"]
         _attach_notes(db, order_id, parsed["notes"], st["last_item"])
+        with_addons = _apply_addons(db, order_id, parsed.get("addons", []), st["last_item"])
+        added_ids = {item["id"] for item, _ in added}
         total = _save_total(db, order_id)
         parts += problems
         ask = None
@@ -513,16 +629,56 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
                     parts.append(say(lang, "q_more"))
                     new_awaiting = "more"
             else:
-                parts.append(say(lang, "added", added=_phrase(added, lang), total=total))
+                fresh = [l for l in _lines(db, order_id) if l["menu_item_id"] in added_ids]
+                added_text = _cart_phrase(fresh, lang) if with_addons else _phrase(added, lang)
+                parts.append(say(lang, "added", added=added_text, total=total))
                 if not ask:
                     parts.append(say(lang, "q_confirm"))
                     new_awaiting = "confirm"
+        for line, names in with_addons:         # add-on for a dish that was already in the cart
+            if line["menu_item_id"] not in added_ids:
+                parts.insert(len(problems), say(lang, "addon_added", addons=join_list(lang, names),
+                                                name=_name(line, lang), total=total))
+        if added and not with_addons and len(added) == 1 and added[0][0]["id"] not in st.setdefault("offered", []):
+            offer = mm.parse_addons(added[0][0])
+            st["offered"].append(added[0][0]["id"])
+            if offer:                       # tell them once what can be added to this dish
+                parts.append(say(lang, "addons_offer", name=_name(added[0][0], lang),
+                                 addons=join_list(lang, [f"{n} (₹{p})" for n, p in offer[:3]], "or")))
         if ask:
             parts.append(ask)
         if not parts:
             parts.append(say(lang, "unknown"))
         if not added and not changed and not ask:
             new_awaiting = awaiting if awaiting in ("more", "confirm", "upsell") else None
+
+    elif intent == "addon":    # "add extra cheese" -> on the dish it belongs to / the last dish
+        with_addons = _apply_addons(db, order_id, parsed.get("addons", []), st.get("last_item"))
+        total = _save_total(db, order_id)
+        if with_addons:
+            for line, names in with_addons:
+                parts.append(say(lang, "addon_added", addons=join_list(lang, names), name=_name(line, lang), total=total))
+            parts.append(say(lang, "q_confirm"))
+            new_awaiting = "confirm"
+        elif not _lines(db, order_id):
+            parts.append(say(lang, "empty_ask"))
+        else:
+            owners = {a["menu_item_id"] for a in parsed.get("addons", [])}
+            names = join_list(lang, [_name(by_id[i], lang) for i in owners if i in by_id], "or")
+            parts.append(say(lang, "not_in_cart", name=names) if names else say(lang, "unknown"))
+            new_awaiting = awaiting
+
+    elif intent == "describe":  # "what is pongal?", "is masala dosa spicy?"
+        for it in parsed["items"]:
+            item = by_id[it["item_id"]]
+            desc = (item.get("description") or "").strip()
+            if desc:
+                parts.append(say(lang, "describe", name=_name(item, lang), price=item["price"], desc=desc))
+            else:
+                parts.append(say(lang, "no_description", name=_name(item, lang), price=item["price"]))
+        if not parsed["items"]:
+            parts.append(say(lang, "unknown"))
+        new_awaiting = awaiting
 
     elif intent == "modify":   # "make it three" -> applies to the last dish
         lines = _lines(db, order_id)
@@ -535,7 +691,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         else:
             db.execute("UPDATE order_items SET quantity = ? WHERE id = ?", (qty, line["line_id"]))
             db.commit()
-            total = _total(_lines(db, order_id))
+            total = _save_total(db, order_id)
             parts.append(say(lang, "modified", qty=qty, name=_name(line, lang), total=total))
             parts.append(say(lang, "q_confirm"))
             new_awaiting = "confirm"
@@ -564,7 +720,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
                 db.execute("DELETE FROM order_items WHERE id = ?", (line["line_id"],))
                 removed.append((item, line["quantity"]))
         db.commit()
-        total = _total(_lines(db, order_id))
+        total = _save_total(db, order_id)
         parts += problems
         if removed:
             if _lines(db, order_id):
@@ -678,16 +834,26 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
 
     reply = " ".join(p for p in parts if p)
     cart_lines = [] if intent == "cancel" else _lines(db, order_id)
+    money = pricing.breakdown(_subtotal(cart_lines))
     cart = {
         "items": [{"name": _name(l, lang), "quantity": l["quantity"], "unit_price": l["unit_price"],
-                   "line_total": l["quantity"] * l["unit_price"], "notes": l["notes"]} for l in cart_lines],
-        "total": _total(cart_lines),
+                   "line_total": l["quantity"] * l["unit_price"], "notes": l["notes"],
+                   "addons": l.get("addons") or ""} for l in cart_lines],
+        "subtotal": money["subtotal"],
+        "tax": money["tax"],
+        "gst_rate": money["gst_rate"],
+        "total": money["total"],
     }
 
     # Generate UPI QR payload as soon as the cart has items so the customer
     # can scan at any time. The order stays DRAFT until they explicitly confirm.
     upi_payload = None
-    if cart["total"] > 0:
+    if payments.enabled():
+        # Razorpay: only the one-time QR for the exact amount, shown at the payment step.
+        if not submitted and new_awaiting == "upi_confirm" and st.get("qr_image") and st.get("qr_amount") == cart["total"]:
+            upi_payload = {"gateway": True, "image_url": st["qr_image"], "amount": cart["total"],
+                           "order_id": order_id, "vpa": "", "payee": config.UPI_PAYEE_NAME, "uri": ""}
+    elif cart["total"] > 0:
         upi_id = config.UPI_ID
         payee = config.UPI_PAYEE_NAME
         amt = cart["total"]
@@ -700,8 +866,8 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             "uri": uri,
         }
 
-    if confirmed:
-        SESSIONS.pop(session_id, None)      # fresh start for the next order
+    if submitted:
+        _drop_state(db, session_id)         # fresh start for the next order
     else:
         st["awaiting"] = new_awaiting
         if new_awaiting not in ("where", "table", "name", "phone", "payment", "upi_confirm"):
@@ -710,18 +876,24 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             st["pending"] = None
         if intent != "repeat":
             st["last_reply"] = reply
+        _save_state(db, session_id, st)
 
     return {
         "reply": reply,
         "intent": intent,
         "source": parsed.get("source", "rules"),
-        "awaiting": None if confirmed else (new_awaiting if new_awaiting is not None else None),
-        "confirmed": confirmed,
+        "awaiting": None if submitted else new_awaiting,
+        # The customer can only SUBMIT. "confirmed" is True only when Razorpay verified the
+        # payment; otherwise the staff confirm it on the dashboard after checking the money.
+        "submitted": bool(submitted),
+        "status": submitted or "DRAFT",
+        "language": language_code,
+        "confirmed": submitted == "CONFIRMED",
         "order_id": order_id,
         "cart": cart,
         "customer_name": st.get("customer_name"),
         "customer_phone": st.get("customer_phone"),
         "payment_mode": st.get("payment_mode"),
-        "serving": None if confirmed else dict(st["serving"]),
+        "serving": None if submitted else dict(st["serving"]),
         "upi": upi_payload,
     }

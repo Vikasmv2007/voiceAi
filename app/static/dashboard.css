@@ -83,3 +83,41 @@ a.btn { text-decoration: none; display: inline-block; }
                animation: cashflash 1.2s infinite; }
 @keyframes cashflash { 50% { background: #d97706; } }
 .btn.cash-collect { background: #b45309; font-weight: 700; }
+
+/* UPI orders waiting for the staff to see the money arrive */
+.upi-banner { background: #1d4ed8; color: #fff; font-weight: 700; font-size: .95rem;
+              text-align: center; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px;
+              animation: upiflash 1.2s infinite; }
+@keyframes upiflash { 50% { background: #2563eb; } }
+.btn.upi-check { background: #1d4ed8; font-weight: 700; }
+
+/* ---- menu editor, add-ons, ETA, feedback, login ---- */
+.lines .addon { display: block; color: #1d4ed8; font-size: .85rem; }
+.chip.eta { background: #ecfdf5; color: #065f46; }
+.chip.eta.late { background: #fee2e2; color: #991b1b; font-weight: 700; }
+.chip.by { background: #f1f5f9; color: #334155; }
+.who { font-size: .9rem; }
+.add-box { margin-bottom: 8px; }
+.menu-row { grid-template-columns: 48px 1fr auto auto auto; }
+.menu-row .name small { display: block; color: var(--muted); font-size: .8rem; }
+.price-box input[title^="Stock"] { width: 64px; }
+.thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; background: #f1ede4;
+         display: flex; align-items: center; justify-content: center; font-size: 1.2rem; }
+.row-actions { display: flex; gap: 6px; }
+.menu-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 16px;
+             background: #faf8f3; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 8px 0 14px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+.form-row.inline { flex-direction: row; align-items: center; gap: 8px; color: var(--ink); }
+.form-row input, .form-row textarea { padding: 8px; font-size: .95rem; border: 1px solid #bbb; border-radius: 6px; color: var(--ink); }
+.form-row textarea { min-height: 60px; resize: vertical; }
+.form-actions { display: flex; gap: 8px; align-items: end; }
+.btn.ghost-dark { background: #fff; color: var(--ink); border: 1px solid #bbb; }
+.form-msg { color: #b00020; margin: 0; grid-column: 1 / -1; }
+.feedback { list-style: none; padding: 0; }
+.feedback li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.feedback strong { color: #d97706; letter-spacing: 1px; }
+@media (max-width: 700px) {
+  .menu-row { grid-template-columns: 44px 1fr; }
+  .menu-row .price-box, .menu-row .switch, .menu-row .row-actions { grid-column: 2; }
+  .top-right { flex-wrap: wrap; }
+}

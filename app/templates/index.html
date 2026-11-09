@@ -37,7 +37,10 @@
       <option value="en-IN">English</option>
       <option value="hi-IN">हिन्दी</option>
       <option value="kn-IN">ಕನ್ನಡ</option>
+      <option value="ta-IN">தமிழ்</option>
+      <option value="te-IN">తెలుగు</option>
     </select>
+    <p class="lang-hint">Tip: you can also just speak or type in your language; the agent switches automatically.</p>
 
     <button id="micBtn" class="mic">🎤 Tap to speak</button>
     <p id="status">Ready
@@ -55,9 +58,17 @@
       <button type="submit">Send</button>
     </form>
 
+    <details id="menuPanel" class="menu-panel">
+      <summary>📖 See the menu (tap a dish to add it)</summary>
+      <div id="menuList" class="menu-list"></div>
+    </details>
+
     <h2>Your order</h2>
     <ul id="cart" class="cart"></ul>
+    <p id="taxLine" class="tax-line" hidden></p>
     <p id="total" class="total"></p>
+
+    <div id="orderBox" class="order-box" hidden></div>
 
     <div id="paymentSection" class="payment-section" hidden>
       <h2>Payment &amp; Confirmation</h2>
@@ -69,9 +80,10 @@
       <div id="upiBox" class="pay-box">
         <p class="pay-hint">Scan with any UPI app (Google Pay, PhonePe, Paytm, BHIM):</p>
         <div id="qrcodeBox" class="qr-container"></div>
+        <img id="gatewayQr" class="gateway-qr" alt="UPI QR code" hidden>
         <p id="upiDetails" class="upi-details"></p>
         <a id="upiPayLink" href="#" class="btn-upi-mobile" style="display:none;">Open in UPI App</a>
-        <button type="button" id="confirmUpiBtn" class="btn-action">✅ I Have Paid · Place Order</button>
+        <button type="button" id="confirmUpiBtn" class="btn-action">✅ I Have Paid · Send for Staff Check</button>
       </div>
 
       <div id="cashBox" class="pay-box" hidden>

@@ -12,8 +12,14 @@ TTS_URL = "https://api.vachana.ai/api/v1/tts/inference"
 MODEL = "timbre-v2.5"
 # One voice per language (from Gnani's voice catalog for Timbre v2.5).
 VOICES = {"en-IN": "Kaveri", "hi-IN": "Nalini", "kn-IN": "Saanvi"}
+# Tamil / Telugu voice names come from .env (GNANI_VOICE_TA / GNANI_VOICE_TE): copy them from
+# Gnani's voice catalog. Until they are set, replies in those languages are shown as text only.
+if config.GNANI_VOICE_TA:
+    VOICES["ta-IN"] = config.GNANI_VOICE_TA
+if config.GNANI_VOICE_TE:
+    VOICES["te-IN"] = config.GNANI_VOICE_TE
 # How to say the rupee sign out loud.
-RUPEES = {"en-IN": "rupees", "hi-IN": "रुपये", "kn-IN": "ರೂಪಾಯಿ"}
+RUPEES = {"en-IN": "rupees", "hi-IN": "रुपये", "kn-IN": "ರೂಪಾಯಿ", "ta-IN": "ரூபாய்", "te-IN": "రూపాయలు"}
 CACHE_DIR = os.path.join(config.BASE_DIR, "tts_cache")
 MAX_CHARS = 500
 RETRY_STATUS = (429, 500, 502, 503, 504)
@@ -43,6 +49,8 @@ def synthesize(text, language="en-IN"):
     if not config.GNANI_API_KEY:
         raise TtsError("GNANI_API_KEY is missing in .env")
     if language not in VOICES:
+        if language in ("ta-IN", "te-IN"):
+            raise TtsError(f"No Gnani voice set for {language}: add GNANI_VOICE_{language[:2].upper()} to .env")
         language = "en-IN"
     spoken = speakable(text, language)[:MAX_CHARS]
     voice = VOICES[language]

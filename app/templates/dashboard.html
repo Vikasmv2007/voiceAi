@@ -8,8 +8,9 @@
 </head>
 <body>
   <header class="top">
-    <h1>🍽️ Kitchen Dashboard</h1>
+    <h1>🍽️ {{ restaurant }} · Kitchen</h1>
     <div class="top-right">
+      <a class="btn ghost" href="/dashboard/tables" target="_blank">🔳 Table QR codes</a>
       <span id="conn" class="conn">connecting...</span>
       <button id="soundBtn" class="btn ghost">🔔 Enable sound alerts</button>
     </div>
@@ -36,7 +37,8 @@
     </section>
 
     <section id="tab-menu" class="panel" hidden>
-      <p class="hint">Turn a dish off and the voice agent stops taking it straight away.</p>
+      <p class="hint">Turn a dish off and the voice agent stops taking it straight away. With a stock count,
+        the dish turns itself off when it runs out. Add-ons and descriptions are used by the voice agent.</p>
       <div id="menuBox"></div>
     </section>
 

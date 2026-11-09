@@ -6,3 +6,5 @@ venv/
 __pycache__/
 *.pyc
 hello.wav
+app/static/uploads/
+.pytest_cache/
