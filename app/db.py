@@ -1,3 +1,4 @@
+"""SQLite connection per request, fresh database creation, and automatic upgrades of old databases."""
 import sqlite3
 from flask import g, current_app
 

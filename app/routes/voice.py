@@ -1,3 +1,4 @@
+"""Customer voice API: speech-to-text (/api/stt), one conversation turn (/api/turn), voice (/api/tts)."""
 import re
 
 from flask import Blueprint, request, jsonify, Response

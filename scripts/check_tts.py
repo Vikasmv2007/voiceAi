@@ -1,4 +1,10 @@
-import os, requests
+"""Checks your Gnani voice (text-to-speech) key: saves hello.wav in the project folder.
+
+Run:  python -m scripts.check_tts
+"""
+import os
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()

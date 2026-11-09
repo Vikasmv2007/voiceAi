@@ -1,3 +1,4 @@
+"""Test helpers: every test gets a fresh database with the starter menu and all optional services off."""
 import uuid
 
 import pytest

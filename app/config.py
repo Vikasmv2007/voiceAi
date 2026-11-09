@@ -1,3 +1,4 @@
+"""All settings, read from the .env file (see .env.example for every option)."""
 import os
 from dotenv import load_dotenv
 
