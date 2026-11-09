@@ -8,6 +8,9 @@ LANGS = ("en", "hi", "kn", "ta", "te")
 
 T = {
     "en": {
+        "ask_phone_named": "Nice to meet you, {name}! Please tell me your 10-digit phone number.",
+        "ask_order": "Thank you! What would you like to order today?",
+        "thanks": "Thank you!",
         "greet": "Hello! Welcome. What would you like to order?",
         "ordered": "Sure! You ordered {cart}.",
         "added": "Added {added}. Your total is ₹{total}.",
@@ -82,6 +85,9 @@ T = {
         "upi_waiting_gateway": "I have not received the payment yet. Please complete it on your UPI app; I will confirm as soon as it arrives.",
     },
     "hi": {
+        "ask_phone_named": "आपसे मिलकर खुशी हुई, {name}! कृपया अपना 10 अंकों का फ़ोन नंबर बताइए।",
+        "ask_order": "धन्यवाद! आज आप क्या ऑर्डर करना चाहेंगे?",
+        "thanks": "धन्यवाद!",
         "greet": "नमस्ते! आपका स्वागत है। आप क्या ऑर्डर करना चाहेंगे?",
         "ordered": "ठीक है! आपने {cart} ऑर्डर किया है।",
         "added": "{added} जोड़ दिया। आपका कुल ₹{total} है।",
@@ -156,6 +162,9 @@ T = {
         "upi_waiting_gateway": "अभी तक भुगतान नहीं मिला है। कृपया अपने UPI ऐप में भुगतान पूरा करें; भुगतान आते ही मैं कन्फर्म कर दूँगा।",
     },
     "kn": {
+        "ask_phone_named": "ನಿಮ್ಮನ್ನು ಭೇಟಿಯಾಗಿ ಸಂತೋಷವಾಯಿತು, {name}! ದಯವಿಟ್ಟು ನಿಮ್ಮ 10 ಅಂಕಿಯ ಮೊಬೈಲ್ ಸಂಖ್ಯೆಯನ್ನು ತಿಳಿಸಿ.",
+        "ask_order": "ಧನ್ಯವಾದಗಳು! ಇಂದು ನೀವು ಏನು ಆರ್ಡರ್ ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
+        "thanks": "ಧನ್ಯವಾದಗಳು!",
         "greet": "ನಮಸ್ಕಾರ! ಸ್ವಾಗತ. ನೀವು ಏನು ಆರ್ಡರ್ ಮಾಡಲು ಬಯಸುತ್ತೀರಿ?",
         "ordered": "ಸರಿ! ನೀವು {cart} ಆರ್ಡರ್ ಮಾಡಿದ್ದೀರಿ.",
         "added": "{added} ಸೇರಿಸಿದ್ದೇನೆ. ನಿಮ್ಮ ಒಟ್ಟು ₹{total}.",
@@ -230,6 +239,9 @@ T = {
         "upi_waiting_gateway": "ಇನ್ನೂ ಪಾವತಿ ಬಂದಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಯುಪಿಐ ಆ್ಯಪ್‌ನಲ್ಲಿ ಪಾವತಿ ಪೂರ್ಣಗೊಳಿಸಿ; ಬಂದ ತಕ್ಷಣ ಕನ್ಫರ್ಮ್ ಮಾಡುತ್ತೇನೆ.",
     },
     "ta": {
+        "ask_phone_named": "வணக்கம் {name}! உங்கள் 10 இலக்க மொபைல் எண்ணைச் சொல்லுங்கள்.",
+        "ask_order": "நன்றி! இன்று என்ன ஆர்டர் செய்ய விரும்புகிறீர்கள்?",
+        "thanks": "நன்றி!",
         "greet": "வணக்கம்! வரவேற்கிறோம். என்ன ஆர்டர் செய்ய விரும்புகிறீர்கள்?",
         "ordered": "சரி! நீங்கள் {cart} ஆர்டர் செய்துள்ளீர்கள்.",
         "added": "{added} சேர்த்துவிட்டேன். உங்கள் மொத்தம் ₹{total}.",
@@ -304,6 +316,9 @@ T = {
         "upi_waiting_gateway": "இன்னும் பணம் வரவில்லை. உங்கள் யுபிஐ செயலியில் பணம் செலுத்துவதை முடியுங்கள்; வந்தவுடன் உறுதி செய்கிறேன்.",
     },
     "te": {
+        "ask_phone_named": "నమస్కారం {name}! దయచేసి మీ 10 అంకెల మొబైల్ నంబర్ చెప్పండి.",
+        "ask_order": "ధన్యవాదాలు! ఈరోజు మీరు ఏమి ఆర్డర్ చేయాలనుకుంటున్నారు?",
+        "thanks": "ధన్యవాదాలు!",
         "greet": "నమస్కారం! స్వాగతం. మీరు ఏమి ఆర్డర్ చేయాలనుకుంటున్నారు?",
         "ordered": "సరే! మీరు {cart} ఆర్డర్ చేశారు.",
         "added": "{added} చేర్చాను. మీ మొత్తం ₹{total}.",

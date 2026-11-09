@@ -448,6 +448,10 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         db.commit()
         if st["ready"]:
             new_awaiting = try_place()      # we were collecting checkout details
+        elif not st.get("customer_phone"):
+            # Order of questions: name -> phone number -> order -> table -> UPI or cash.
+            parts.append(say(lang, "ask_phone_named", name=name_answer))
+            new_awaiting = "phone"
         else:
             parts.append(say(lang, "greet_named", name=name_answer))
             new_awaiting = awaiting if awaiting not in (None, "name") else None
@@ -466,7 +470,14 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             st["customer_phone"] = phone
             db.execute("UPDATE orders SET customer_phone = ? WHERE id = ?", (phone, order_id))
             db.commit()
-            new_awaiting = try_place()
+            if st["ready"]:
+                new_awaiting = try_place()          # asked at checkout: carry on to table / payment
+            elif lines_before:
+                parts.append(say(lang, "thanks") + " " + say(lang, "q_more"))
+                new_awaiting = "more"
+            else:
+                parts.append(say(lang, "ask_order"))  # asked right after the name: now take the order
+                new_awaiting = None
         elif intent == "cancel":
             db.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", (order_id,))
             db.commit()
