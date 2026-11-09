@@ -52,7 +52,7 @@ menu and orders are kept.
 Pick one:
 - **Staff logins (recommended):** run `python -m scripts.add_staff`. An *owner* can do everything; a
   *staff* login can handle orders but cannot change the menu. Each confirmation records who did it.
-- **Shared PIN:** set `STAFF_PIN` in `.env`. The dashboard asks for it once.
+- **Shared PIN:** set `STAFF_PIN` in `.env`. **Confirming a payment (cash collected / UPI received) always asks for the PIN, every time**, and is refused if `STAFF_PIN` is not set. For other steps the dashboard asks once.
 
 If neither is set, staff actions are open to anyone and the app prints a warning.
 

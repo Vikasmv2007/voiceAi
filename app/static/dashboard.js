@@ -35,7 +35,9 @@ function saveStaffPin(pin) {
 
 async function api(path, options, retried) {
   const opts = Object.assign({}, options || {});
-  opts.headers = Object.assign({}, opts.headers || {}, { "X-Staff-Pin": staffPin() || window._staffPin || "" });
+  const ownPin = opts.headers && opts.headers["X-Confirm-Pin"];   // payment confirmation: PIN typed just now
+  opts.headers = Object.assign({ "X-Staff-Pin": staffPin() || window._staffPin || "" }, opts.headers || {});
+  if (ownPin) retried = true;                                      // never ask again / never remember it
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && data.login && !data.staff_pin) {     // staff accounts: go and log in
@@ -46,7 +48,7 @@ async function api(path, options, retried) {
     const pin = prompt(staffPin() ? "Wrong staff PIN. Enter the staff PIN:" : "Enter the staff PIN:");
     if (pin) { saveStaffPin(pin.trim()); return api(path, options, true); }
   }
-  if (res.status === 401 && data.staff_pin) saveStaffPin("");
+  if (res.status === 401 && data.staff_pin && !ownPin) saveStaffPin("");
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
@@ -163,8 +165,14 @@ function orderCard(order, fresh) {
     buttons.push(el("button", {
       class: "btn small" + (isCashPending ? " cash-collect" : isUpiPending ? " upi-check" : ""),
       onclick: () => {
-        if (isUpiPending && !confirm("Order #" + order.id + ": have you seen ₹" + order.total +
-                                     " arrive in your UPI app? Only then confirm.")) return;
+        if (isCashPending || isUpiPending) {
+          // Payment confirmation: the secret staff PIN is asked EVERY time.
+          const what = isCashPending ? "Cash of ₹" + order.total + " collected" : "UPI payment of ₹" + order.total + " received";
+          const pin = prompt("Order #" + order.id + ": " + what + "?\nEnter the staff PIN to confirm the order:");
+          if (!pin) return;
+          changeStatus(order.id, "CONFIRMED", pin.trim());
+          return;
+        }
         changeStatus(order.id, NEXT_STATUS[order.status]);
       }
     }, NEXT_LABEL[order.status]));
@@ -264,11 +272,14 @@ function newestSeconds(order) {
   return (Date.now() - new Date(placedAt(order)).getTime()) / 1000;
 }
 
-async function changeStatus(id, status) {
+async function changeStatus(id, status, confirmPin) {
   try {
-    await api("/api/orders/" + id + "/status", sendJson("POST", { status }));
+    const options = sendJson("POST", { status });
+    if (confirmPin) options.headers["X-Staff-Pin"] = options.headers["X-Confirm-Pin"] = confirmPin;
+    await api("/api/orders/" + id + "/status", options);
   } catch (err) {
-    alert(err.message);
+    alert(confirmPin && /PIN/.test(err.message) && !/STAFF_PIN/.test(err.message)
+      ? "Wrong staff PIN. Order #" + id + " was NOT confirmed." : err.message);
   }
   loadLive();
 }
