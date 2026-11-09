@@ -27,7 +27,7 @@ const upiPayLink = document.getElementById("upiPayLink");
 const confirmUpiBtn = document.getElementById("confirmUpiBtn");
 const submitCashBtn = document.getElementById("submitCashBtn");
 
-let currentPaymentMode = "upi";
+let currentPaymentMode = null;   // chosen by the customer (button or voice); the agent asks "UPI or cash?"
 let qrInstance = null;
 const gatewayQr = document.getElementById("gatewayQr");
 const taxLine = document.getElementById("taxLine");
@@ -80,26 +80,9 @@ function newSessionId() {
 }
 let sessionId = newSessionId();
 
-// Remember customer name/phone in this browser
-try {
-  if (custNameInput && localStorage.getItem("custName")) {
-    custNameInput.value = localStorage.getItem("custName");
-  }
-  if (custPhoneInput && localStorage.getItem("custPhone")) {
-    custPhoneInput.value = localStorage.getItem("custPhone");
-  }
-} catch (e) { /* ignore storage errors */ }
-
-if (custNameInput) {
-  custNameInput.addEventListener("change", () => {
-    try { localStorage.setItem("custName", custNameInput.value.trim()); } catch (e) {}
-  });
-}
-if (custPhoneInput) {
-  custPhoneInput.addEventListener("change", () => {
-    try { localStorage.setItem("custPhone", custPhoneInput.value.trim()); } catch (e) {}
-  });
-}
+// Name and phone are NOT remembered: the agent asks every new customer (a shared table device must
+// never reuse the previous customer's name). Forget anything an older version saved.
+try { localStorage.removeItem("custName"); localStorage.removeItem("custPhone"); } catch (e) { /* ignore */ }
 
 // Remembered in this browser so "same as last time" works. A QR code on the table can open the page as ?table=5.
 let customerId;
@@ -296,7 +279,28 @@ async function startConversation() {
   convo.proc.connect(convo.sink).connect(audioCtx.destination);
   VAD.frameMs = (2048 / audioCtx.sampleRate) * 1000;
   convo.proc.onaudioprocess = (e) => onAudioFrame(e.inputBuffer.getChannelData(0));
-  listen();
+  if (greetedSession !== sessionId) {
+    greetedSession = sessionId;
+    greetFirst();                                  // "Hello! Welcome. May I know your name please?"
+  } else {
+    listen();
+  }
+}
+
+// Like a waiter: the agent speaks first and asks the customer's name, then listens.
+let greetedSession = null;
+async function greetFirst() {
+  setState("think");
+  try {
+    const result = await sendTurn("hello", undefined, true);
+    if (!convo.on) return;
+    setState("speak");
+    await result.speech;
+    if (convo.on && convo.state === "speak") listen();
+  } catch (err) {
+    statusEl.textContent = "Error: " + err.message;
+    if (convo.on) listen();
+  }
 }
 
 function endConversation(message) {
@@ -506,11 +510,9 @@ async function sendTurn(text, overridePayment, fromConversation) {
   // Sync profile details back from order brain
   if (data.customer_name && custNameInput && !custNameInput.value) {
     custNameInput.value = data.customer_name;
-    try { localStorage.setItem("custName", data.customer_name); } catch (e) {}
   }
   if (data.customer_phone && custPhoneInput && !custPhoneInput.value) {
     custPhoneInput.value = data.customer_phone;
-    try { localStorage.setItem("custPhone", data.customer_phone); } catch (e) {}
   }
   if (data.payment_mode) {
     setPaymentMode(data.payment_mode);
@@ -555,6 +557,10 @@ async function sendTurn(text, overridePayment, fromConversation) {
     chime(1);
     if (paymentSection) paymentSection.hidden = true;
     sessionId = newSessionId(); // the next order starts fresh
+    // The next customer is asked their own name, phone and payment again.
+    if (custNameInput) custNameInput.value = "";
+    if (custPhoneInput) custPhoneInput.value = "";
+    currentPaymentMode = null;
   } else if (!convo.on) {
     statusEl.textContent = "Done · understood by " + data.source;
   }
