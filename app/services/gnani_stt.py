@@ -15,7 +15,7 @@ class SttError(Exception):
 
 def transcribe(wav_bytes, language_code="en-IN"):
     if not config.GNANI_API_KEY:
-        raise SttError("GNANI_API_KEY is missing in .env")
+        raise SttError("GNANI_API_KEY is not set (.env locally, Environment Variables on Vercel)")
     last_error = "unknown error"
     for attempt in range(2):                      # one quick retry for busy/unstable moments
         try:

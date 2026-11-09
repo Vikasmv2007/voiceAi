@@ -20,7 +20,9 @@ if config.GNANI_VOICE_TE:
     VOICES["te-IN"] = config.GNANI_VOICE_TE
 # How to say the rupee sign out loud.
 RUPEES = {"en-IN": "rupees", "hi-IN": "रुपये", "kn-IN": "ರೂಪಾಯಿ", "ta-IN": "ரூபாய்", "te-IN": "రూపాయలు"}
-CACHE_DIR = os.path.join(config.BASE_DIR, "tts_cache")
+# On Vercel only /tmp is writable; the project folder itself is read-only.
+CACHE_DIR = os.getenv("TTS_CACHE_DIR") or (
+    "/tmp/tts_cache" if os.getenv("VERCEL") else os.path.join(config.BASE_DIR, "tts_cache"))
 MAX_CHARS = 500
 RETRY_STATUS = (429, 500, 502, 503, 504)
 
@@ -47,7 +49,7 @@ def synthesize(text, language="en-IN"):
     """Return (audio_bytes, mime_type). Repeated sentences come from a local
     cache, so they cost no Gnani credits."""
     if not config.GNANI_API_KEY:
-        raise TtsError("GNANI_API_KEY is missing in .env")
+        raise TtsError("GNANI_API_KEY is not set (.env locally, Environment Variables on Vercel)")
     if language not in VOICES:
         if language in ("ta-IN", "te-IN"):
             raise TtsError(f"No Gnani voice set for {language}: add GNANI_VOICE_{language[:2].upper()} to .env")
@@ -56,12 +58,18 @@ def synthesize(text, language="en-IN"):
     voice = VOICES[language]
 
     key = hashlib.sha1(f"{MODEL}|{voice}|{language}|{spoken}".encode("utf-8")).hexdigest()
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+    except OSError:
+        pass                                   # no cache on a read-only disk: just call Gnani
     for ext, mime, _ in FORMATS:
         path = os.path.join(CACHE_DIR, f"{key}.{ext}")
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                return f.read(), mime
+        try:
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    return f.read(), mime
+        except OSError:
+            pass
 
     last_error, last_status = "unknown error", None
     for ext, mime, audio_config in FORMATS:
@@ -81,8 +89,11 @@ def synthesize(text, language="en-IN"):
                     continue
                 break
             if r.ok and r.content:
-                with open(os.path.join(CACHE_DIR, f"{key}.{ext}"), "wb") as f:
-                    f.write(r.content)
+                try:
+                    with open(os.path.join(CACHE_DIR, f"{key}.{ext}"), "wb") as f:
+                        f.write(r.content)
+                except OSError:
+                    pass                         # audio still works without the cache
                 return r.content, mime
             last_error, last_status = f"Gnani TTS error {r.status_code}: {r.text[:200]}", r.status_code
             if r.status_code in RETRY_STATUS and attempt == 0:
