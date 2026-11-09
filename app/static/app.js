@@ -365,6 +365,12 @@ async function sendTurn(text, overridePayment) {
   if (data.payment_mode) {
     setPaymentMode(data.payment_mode);
   }
+  // If the customer SAID "takeaway" / "table 5", show it in the form too.
+  if (data.serving && orderTypeSelect && data.serving.type) {
+    orderTypeSelect.value = data.serving.type;
+    if (tableField) tableField.style.display = data.serving.type === "takeaway" ? "none" : "";
+    if (data.serving.table && tableNoInput && !tableNoInput.value) tableNoInput.value = data.serving.table;
+  }
 
   // Update QR scanner display if cart has items
   renderPayment(data);

@@ -1,3 +1,8 @@
 .env
 restaurant.db
 tts_cache/
+venv/
+.venv/
+__pycache__/
+*.pyc
+hello.wav

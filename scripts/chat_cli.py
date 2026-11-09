@@ -4,6 +4,9 @@ Run from the project root:   python -m scripts.chat_cli
 Type  /hi  or  /kn  to switch language, /en to come back, Ctrl+C to quit.
 """
 import uuid
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")   # Windows consoles cannot print ₹ / Hindi / Kannada otherwise
 
 from app import create_app
 from app.services import order_engine
