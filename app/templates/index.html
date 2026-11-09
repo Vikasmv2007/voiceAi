@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Order</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="card">
+    <h1>Voice Order</h1>
+
+    <div class="customer-info">
+      <div class="field-row">
+        <label for="custName">Your Name</label>
+        <input id="custName" type="text" placeholder="e.g. Vikas" autocomplete="name">
+      </div>
+      <div class="field-row">
+        <label for="custPhone">Phone Number</label>
+        <input id="custPhone" type="tel" placeholder="10-digit mobile" maxlength="10" autocomplete="tel">
+      </div>
+      <div class="field-row">
+        <label for="orderType">Order Type</label>
+        <select id="orderType">
+          <option value="dine-in">Dine-in</option>
+          <option value="takeaway">Takeaway</option>
+        </select>
+      </div>
+      <div class="field-row" id="tableField">
+        <label for="tableNo">Table No.</label>
+        <input id="tableNo" type="text" placeholder="e.g. 1" maxlength="3">
+      </div>
+    </div>
+
+    <label for="language">Language</label>
+    <select id="language">
+      <option value="en-IN">English</option>
+      <option value="hi-IN">हिन्दी</option>
+      <option value="kn-IN">ಕನ್ನಡ</option>
+    </select>
+
+    <button id="micBtn" class="mic">🎤 Tap to speak</button>
+    <p id="status">Ready
+      <label class="speak"><input type="checkbox" id="speakBox" checked> 🔊 Speak replies</label>
+    </p>
+
+    <h2>You said</h2>
+    <p id="transcript">—</p>
+
+    <h2>Agent</h2>
+    <p id="reply">—</p>
+
+    <form id="typedForm" class="typed">
+      <input id="typedInput" type="text" placeholder="...or type here to test (uses no voice credits)" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+
+    <h2>Your order</h2>
+    <ul id="cart" class="cart"></ul>
+    <p id="total" class="total"></p>
+
+    <div id="paymentSection" class="payment-section" hidden>
+      <h2>Payment &amp; Confirmation</h2>
+      <div class="pay-toggle">
+        <button type="button" id="payUpiBtn" class="pay-btn active">📱 UPI / QR Scanner</button>
+        <button type="button" id="payCashBtn" class="pay-btn">💵 Cash</button>
+      </div>
+
+      <div id="upiBox" class="pay-box">
+        <p class="pay-hint">Scan with any UPI app (Google Pay, PhonePe, Paytm, BHIM):</p>
+        <div id="qrcodeBox" class="qr-container"></div>
+        <p id="upiDetails" class="upi-details"></p>
+        <a id="upiPayLink" href="#" class="btn-upi-mobile" style="display:none;">Open in UPI App</a>
+        <button type="button" id="confirmUpiBtn" class="btn-action">✅ I Have Paid · Place Order</button>
+      </div>
+
+      <div id="cashBox" class="pay-box" hidden>
+        <p class="pay-hint" id="cashHint">Pay cash to the staff. The kitchen will confirm your order after collecting payment.</p>
+        <button type="button" id="submitCashBtn" class="btn-action">📨 Submit Order (Pay Cash to Staff)</button>
+      </div>
+    </div>
+  </main>
+  <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

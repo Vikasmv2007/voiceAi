@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Restaurant Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+  <header class="top">
+    <h1>🍽️ Kitchen Dashboard</h1>
+    <div class="top-right">
+      <span id="conn" class="conn">connecting...</span>
+      <button id="soundBtn" class="btn ghost">🔔 Enable sound alerts</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="live">Live orders</button>
+    <button class="tab" data-tab="history">History</button>
+    <button class="tab" data-tab="menu">Menu</button>
+    <button class="tab" data-tab="stats">Analytics</button>
+  </nav>
+
+  <main>
+    <section id="tab-live" class="panel">
+      <div class="board">
+        <div class="col"><h2>New <span id="count-CONFIRMED" class="count">0</span></h2><div id="col-CONFIRMED"></div></div>
+        <div class="col"><h2>Preparing <span id="count-PREPARING" class="count">0</span></h2><div id="col-PREPARING"></div></div>
+        <div class="col"><h2>Ready <span id="count-READY" class="count">0</span></h2><div id="col-READY"></div></div>
+      </div>
+    </section>
+
+    <section id="tab-history" class="panel" hidden>
+      <div id="historyBox"></div>
+    </section>
+
+    <section id="tab-menu" class="panel" hidden>
+      <p class="hint">Turn a dish off and the voice agent stops taking it straight away.</p>
+      <div id="menuBox"></div>
+    </section>
+
+    <section id="tab-stats" class="panel" hidden>
+      <div id="statsBox"></div>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>

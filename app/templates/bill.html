@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bill #{{ order.id }}</title>
+  <style>
+    body { font-family: "Courier New", monospace; background: #f1f1f1; margin: 0; padding: 16px; color: #111; }
+    .bill { max-width: 340px; margin: 0 auto; background: #fff; padding: 18px 16px; }
+    h1 { font-size: 1.15rem; text-align: center; margin: 0 0 2px; }
+    .addr, .center { text-align: center; font-size: .85rem; margin: 2px 0; }
+    hr { border: 0; border-top: 1px dashed #000; margin: 10px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th { text-align: left; border-bottom: 1px dashed #000; padding-bottom: 4px; }
+    th.r, td.r { text-align: right; }
+    td { padding: 3px 0; vertical-align: top; }
+    .note { font-size: .78rem; color: #444; }
+    .total { display: flex; justify-content: space-between; font-weight: bold; font-size: 1.05rem; }
+    .void { text-align: center; color: #b00020; font-weight: bold; border: 2px solid #b00020; padding: 4px; margin-bottom: 8px; }
+    button { display: block; margin: 14px auto 0; padding: 10px 20px; font-size: 1rem; cursor: pointer; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .bill { max-width: none; padding: 0; }
+      button { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bill">
+    {% if cancelled %}<div class="void">CANCELLED</div>{% endif %}
+    <h1>{{ name }}</h1>
+    {% if address %}<p class="addr">{{ address }}</p>{% endif %}
+    <hr>
+    <p class="center">Order #{{ order.id }} · {{ where }}</p>
+    <p class="center">{{ when }}</p>
+    {% if order.customer_name %}<p class="center">Customer: <strong>{{ order.customer_name }}</strong>{% if order.customer_phone %} · {{ order.customer_phone }}{% endif %}</p>{% endif %}
+    {% if order.payment_mode %}<p class="center">Payment: <strong>{{ order.payment_mode|upper }}</strong></p>{% endif %}
+    <hr>
+    <table>
+      <thead><tr><th>Item</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead>
+      <tbody>
+      {% for l in lines %}
+        <tr>
+          <td>{{ l.name_en }}{% if l.notes %}<div class="note">↳ {{ l.notes }}</div>{% endif %}</td>
+          <td class="r">{{ l.quantity }}</td>
+          <td class="r">{{ l.unit_price }}</td>
+          <td class="r">{{ l.quantity * l.unit_price }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <hr>
+    <div class="total"><span>TOTAL</span><span>₹{{ order.total }}</span></div>
+    <hr>
+    <p class="center">Thank you! Visit again.</p>
+    <button onclick="window.print()">🖨 Print bill</button>
+  </div>
+</body>
+</html>
