@@ -5,7 +5,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-DATABASE = os.getenv("DATABASE_PATH") or os.path.join(BASE_DIR, "restaurant.db")
+# On Vercel only /tmp can be written to (and it is erased between requests: see README "Going live").
+DATABASE = os.getenv("DATABASE_PATH") or (
+    "/tmp/restaurant.db" if os.getenv("VERCEL") else os.path.join(BASE_DIR, "restaurant.db"))
 GNANI_API_KEY = os.getenv("GNANI_API_KEY")
 
 # Optional LLM: any OpenAI-compatible chat API. Leave LLM_BASE_URL empty to run on rules only.

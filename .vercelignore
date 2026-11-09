@@ -1,0 +1,11 @@
+venv
+.venv
+.env
+restaurant.db
+tts_cache
+tests
+docs
+.github
+.git
+__pycache__
+*.pyc
