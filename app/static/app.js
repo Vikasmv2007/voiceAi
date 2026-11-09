@@ -34,6 +34,46 @@ const taxLine = document.getElementById("taxLine");
 const orderBox = document.getElementById("orderBox");
 let paymentPoll = null;          // Razorpay QR on screen: ask the server whether the money arrived
 
+// ---- Mic button: icon + state (the status line under it says what is happening) ----
+function setMic(state) {
+  const icon = { idle: "🎤", rec: "⏹", busy: "⏳" }[state] || "🎤";
+  const label = { idle: "Tap to speak", rec: "Tap to stop", busy: "Working" }[state] || "Tap to speak";
+  micBtn.replaceChildren(Object.assign(document.createElement("span"), { className: "mic-icon", textContent: icon }));
+  micBtn.setAttribute("aria-label", label);
+  micBtn.title = label;
+}
+
+// ---- Phones: the cart is a slide-up sheet opened from the bottom bar ----
+const cartSheet = document.getElementById("cartSheet");
+const cartBar = document.getElementById("cartBar");
+const sheetBackdrop = document.getElementById("sheetBackdrop");
+const isPhone = () => window.matchMedia("(max-width: 900px)").matches;
+function openSheet() {
+  if (!cartSheet || !isPhone()) return;
+  cartSheet.classList.add("open");
+  if (sheetBackdrop) sheetBackdrop.hidden = false;
+  if (cartBar) cartBar.hidden = true;
+}
+function closeSheet() {
+  if (!cartSheet) return;
+  cartSheet.classList.remove("open");
+  if (sheetBackdrop) sheetBackdrop.hidden = true;
+  updateCartBar();
+}
+let cartItemsCount = 0, cartTotalNow = 0;
+function updateCartBar() {
+  if (!cartBar) return;
+  const open = cartSheet && cartSheet.classList.contains("open");
+  cartBar.hidden = open || (cartItemsCount === 0 && !(orderBox && !orderBox.hidden));
+  document.getElementById("cartCount").textContent = cartItemsCount ? cartItemsCount + (cartItemsCount === 1 ? " item" : " items") : "Your order";
+  document.getElementById("cartBarTotal").textContent = cartItemsCount ? "₹" + cartTotalNow : "View status";
+}
+if (cartBar) cartBar.addEventListener("click", openSheet);
+if (sheetBackdrop) sheetBackdrop.addEventListener("click", closeSheet);
+const sheetCloseBtn = document.getElementById("sheetClose");
+if (sheetCloseBtn) sheetCloseBtn.addEventListener("click", closeSheet);
+window.addEventListener("resize", () => { if (!isPhone()) closeSheet(); });
+
 function newSessionId() {
   return (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random();
 }
@@ -67,6 +107,9 @@ try {
   if (!customerId) { customerId = newSessionId(); localStorage.setItem("customerId", customerId); }
 } catch (e) { customerId = newSessionId(); }
 const tableFromUrl = new URLSearchParams(location.search).get("table");
+if (tableFromUrl && /^[1-9][0-9]?$/.test(tableFromUrl) && document.getElementById("whereLine")) {
+  document.getElementById("whereLine").textContent = "🍽 Table " + tableFromUrl + " · Order by voice or tap to add";
+}
 if (tableNoInput && tableFromUrl) {
   tableNoInput.value = tableFromUrl;
 }
@@ -140,6 +183,7 @@ function watchOrder(id, initialStatus) {
       if (d.status === last) return;
       last = d.status;
       renderOrderBox(id, d);
+      updateCartBar();
       if (d.status === "CONFIRMED") {
         showBanner("✅ " + (d.message || ("Order #" + id + " confirmed by kitchen!")));
         chime(1);
@@ -276,7 +320,7 @@ async function startRecording() {
   mediaRecorder.onstop = handleStop;
   mediaRecorder.start();
   micBtn.classList.add("recording");
-  micBtn.textContent = "⏹ Tap to stop";
+  setMic("rec");
   statusEl.textContent = "Listening...";
   autoStop = setTimeout(stopRecording, MAX_SECONDS * 1000);
 }
@@ -290,7 +334,7 @@ async function handleStop() {
   stream.getTracks().forEach((t) => t.stop());
   micBtn.classList.remove("recording");
   micBtn.disabled = true;
-  micBtn.textContent = "Working...";
+  setMic("busy");
   statusEl.textContent = "Understanding your voice...";
   try {
     const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
@@ -314,7 +358,7 @@ async function handleStop() {
     statusEl.textContent = "Error: " + err.message;
   } finally {
     micBtn.disabled = false;
-    micBtn.textContent = "🎤 Tap to speak";
+    setMic("idle");
   }
 }
 
@@ -375,6 +419,13 @@ async function sendTurn(text, overridePayment) {
 
   // Update QR scanner display if cart has items
   renderPayment(data);
+  // On phones the QR / payment and the cancel button live in the cart sheet: bring it up when needed.
+  if (data.submitted || ["upi_confirm", "payment", "phone"].includes(data.awaiting)) openSheet();
+  if (data.awaiting === "phone" && custPhoneInput) {
+    const box = custPhoneInput.closest("details");
+    if (box) box.open = true;                      // show the phone box so they can type the number
+    if (!custPhoneInput.value) custPhoneInput.focus({ preventScroll: false });
+  }
 
   // The customer can only SUBMIT. The staff confirm the order on the dashboard after
   // checking the payment; watchOrder() tells the customer when that happens.
@@ -395,6 +446,7 @@ async function sendTurn(text, overridePayment) {
     }
     watchOrder(data.order_id, data.status);
     renderOrderBox(data.order_id, { status: data.status });
+    updateCartBar();
     chime(1);
     if (paymentSection) paymentSection.hidden = true;
     sessionId = newSessionId(); // the next order starts fresh
@@ -421,6 +473,9 @@ function renderCart(cart) {
     taxLine.hidden = !(cart.items.length && cart.tax);
     taxLine.textContent = "Subtotal ₹" + cart.subtotal + " + GST " + cart.gst_rate + "% ₹" + cart.tax;
   }
+  cartItemsCount = cart.items.reduce((n, it) => n + it.quantity, 0);
+  cartTotalNow = cart.total;
+  updateCartBar();
   if (cart.items.length) {
     const label = document.createElement("span");
     label.textContent = "Total";
@@ -581,47 +636,83 @@ function renderOrderBox(id, d) {
   }
 }
 
-// ---- The menu with photos: tap a dish to add one ----
+// ---- The menu: food-app style cards; tap a dish to add one ----
+const DISH_EMOJI = [[/dosa|dose|crepe/i, "🥞"], [/idli|idly/i, "🍚"], [/vada|vade/i, "🍩"], [/coffee|kaapi/i, "☕"],
+                    [/chai|tea/i, "🍵"], [/pongal|khichdi/i, "🍲"], [/upma|uppit/i, "🥣"], [/kesari|halwa|sweet|payasam/i, "🍮"],
+                    [/juice|shake|lassi/i, "🥤"], [/biryani|bath|rice|meal|thali/i, "🍛"], [/roll|wrap/i, "🌯"],
+                    [/paneer|curry/i, "🍛"], [/chicken|mutton|egg|fish/i, "🍗"]];
+function dishEmoji(item) {
+  const hit = DISH_EMOJI.find(([re]) => re.test(item.name_en + " " + item.category));
+  return hit ? hit[1] : "🍽️";
+}
+function node(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
 async function loadCustomerMenu() {
   const list = document.getElementById("menuList");
+  const chips = document.getElementById("catChips");
   if (!list) return;
   try {
     const items = await (await fetch("/api/menu")).json();
     const nameKey = { "hi-IN": "name_hi", "kn-IN": "name_kn", "ta-IN": "name_ta", "te-IN": "name_te" };
+    const cats = [...new Set(items.map((it) => it.category))];
     list.replaceChildren();
-    let cat = null;
-    for (const it of items) {
-      if (it.category !== cat) {
-        cat = it.category;
-        const h = document.createElement("p");
-        h.className = "menu-cat";
-        h.textContent = cat;
-        list.append(h);
+    if (chips) chips.replaceChildren();
+    cats.forEach((cat, ci) => {
+      const inCat = items.filter((it) => it.category === cat);
+      const anchor = "cat-" + ci;
+      const head = node("h3", "menu-cat", cat);
+      head.id = anchor;
+      head.append(node("small", null, inCat.length + (inCat.length === 1 ? " item" : " items")));
+      list.append(head);
+      if (chips) {
+        const chip = node("button", "cat-chip" + (ci === 0 ? " active" : ""), cat);
+        chip.type = "button";
+        chip.addEventListener("click", () => {
+          chips.querySelectorAll(".cat-chip").forEach((c) => c.classList.toggle("active", c === chip));
+          document.getElementById(anchor).scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        chips.append(chip);
       }
-      const shown = it[nameKey[langSel.value]] || it.name_en;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "dish";
-      b.disabled = !it.available;
-      const pic = it.image_url ? Object.assign(document.createElement("img"), { src: it.image_url, alt: "" })
-                               : Object.assign(document.createElement("span"), { className: "ph", textContent: "🍽" });
-      const mid = document.createElement("span");
-      const nm = document.createElement("div");
-      nm.className = "d-name";
-      const dot = document.createElement("span");
-      dot.className = "veg-dot " + (it.veg ? "veg" : "nonveg");
-      nm.append(dot, shown + (it.available ? "" : " (sold out)"));
-      const ds = document.createElement("div");
-      ds.className = "d-desc";
-      ds.textContent = it.description || "";
-      mid.append(nm, ds);
-      const pr = document.createElement("span");
-      pr.className = "d-price";
-      pr.textContent = "₹" + it.price;
-      b.append(pic, mid, pr);
-      b.addEventListener("click", () => sendTurn("one " + it.name_en).catch((e) => { statusEl.textContent = e.message; }));
-      list.append(b);
-    }
+      for (const it of inCat) {
+        const shown = it[nameKey[langSel.value]] || it.name_en;
+        const card = node("button", "dish");
+        card.type = "button";
+        card.disabled = !it.available;
+        card.setAttribute("aria-label", "Add " + it.name_en + ", ₹" + it.price);
+        const photo = node("div", "d-photo c" + (ci % 5));
+        if (it.image_url) {
+          const img = node("img");
+          img.src = it.image_url;
+          img.alt = "";
+          img.loading = "lazy";
+          img.onerror = () => { img.remove(); photo.prepend(dishEmoji(it)); };
+          photo.append(img);
+        } else {
+          photo.append(dishEmoji(it));
+        }
+        if (!it.available) photo.append(node("span", "sold-tag", "Sold out"));
+        if (it.available) photo.append(node("span", "d-add on-photo", "ADD"));
+        const body = node("div", "d-body");
+        const name = node("div", "d-name");
+        name.append(node("span", "veg-dot " + (it.veg ? "veg" : "nonveg")), shown);
+        body.append(name, node("div", "d-desc", it.description || ""));
+        const foot = node("div", "d-foot");
+        foot.append(node("span", "d-price", "₹" + it.price), node("span", "d-add in-foot", it.available ? "ADD" : "Sold out"));
+        body.append(foot);
+        card.append(photo, body);
+        card.addEventListener("click", () => {
+          card.classList.remove("added"); void card.offsetWidth; card.classList.add("added");
+          transcriptEl.textContent = "one " + shown;
+          sendTurn("one " + it.name_en).catch((e) => { statusEl.textContent = e.message; });
+        });
+        list.append(card);
+      }
+    });
   } catch (e) { /* the menu list is optional */ }
 }
 loadCustomerMenu();
