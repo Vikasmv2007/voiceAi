@@ -1,3 +1,4 @@
+import os
 import secrets
 from datetime import timedelta
 
@@ -18,13 +19,30 @@ def create_app(test_config=None):
         SESSION_COOKIE_SAMESITE="Lax",
         PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
         MAX_CONTENT_LENGTH=5 * 1024 * 1024,        # uploads (voice clips, menu photos)
+        TEMPLATES_AUTO_RELOAD=True,                # after "git pull" the new pages show without a restart
     )
     if test_config:
         app.config.update(test_config)
     if config.TRUST_PROXY:
         # Behind nginx / Caddy / Render: trust their X-Forwarded-* headers (real IP, https).
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.jinja_env.auto_reload = True
     app.teardown_appcontext(close_db)
+
+    @app.url_defaults
+    def static_version(endpoint, values):
+        """style.css -> style.css?v=<last change>: browsers always load the CSS/JS that match the page."""
+        if endpoint == "static" and "filename" in values and "v" not in values:
+            try:
+                values["v"] = int(os.stat(os.path.join(app.static_folder, values["filename"])).st_mtime)
+            except OSError:
+                pass
+
+    @app.after_request
+    def no_stale_pages(response):
+        if response.mimetype == "text/html":
+            response.headers["Cache-Control"] = "no-store"
+        return response
     ensure_schema(app.config["DATABASE"])
     _warn_about_setup()
 
