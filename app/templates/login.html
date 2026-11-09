@@ -3,12 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#14532d">
   <title>Staff Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
-  <main class="card">
-    <h1>🍽️ Staff login</h1>
+<body class="login-page">
+  <main class="panel login-card">
+    <span class="brand-logo" aria-hidden="true">🍽️</span>
+    <h1>Staff login</h1>
+    <p class="muted small">Kitchen dashboard</p>
     {% if error %}<p class="error-msg">{{ error }}</p>{% endif %}
     <form method="post" class="login-form">
       <input type="hidden" name="next" value="{{ next }}">

@@ -2,96 +2,142 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Voice Order</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14532d">
+  <title>{{ restaurant }} · Order by voice</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="card">
-    <h1>Voice Order</h1>
-
-    <div class="customer-info">
-      <div class="field-row">
-        <label for="custName">Your Name</label>
-        <input id="custName" type="text" placeholder="e.g. Vikas" autocomplete="name">
-      </div>
-      <div class="field-row">
-        <label for="custPhone">Phone Number</label>
-        <input id="custPhone" type="tel" placeholder="10-digit mobile" maxlength="10" autocomplete="tel">
-      </div>
-      <div class="field-row">
-        <label for="orderType">Order Type</label>
-        <select id="orderType">
-          <option value="dine-in">Dine-in</option>
-          <option value="takeaway">Takeaway</option>
-        </select>
-      </div>
-      <div class="field-row" id="tableField">
-        <label for="tableNo">Table No.</label>
-        <input id="tableNo" type="text" placeholder="e.g. 1" maxlength="3">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-logo" aria-hidden="true">🍛</span>
+      <div>
+        <div class="brand-name">{{ restaurant }}</div>
+        <div class="brand-sub">Order by voice · 5 languages</div>
       </div>
     </div>
+    <label class="lang-pill" title="Language">
+      <span aria-hidden="true">🌐</span>
+      <select id="language" aria-label="Language">
+        <option value="en-IN">English</option>
+        <option value="hi-IN">हिन्दी</option>
+        <option value="kn-IN">ಕನ್ನಡ</option>
+        <option value="ta-IN">தமிழ்</option>
+        <option value="te-IN">తెలుగు</option>
+      </select>
+    </label>
+  </header>
 
-    <label for="language">Language</label>
-    <select id="language">
-      <option value="en-IN">English</option>
-      <option value="hi-IN">हिन्दी</option>
-      <option value="kn-IN">ಕನ್ನಡ</option>
-      <option value="ta-IN">தமிழ்</option>
-      <option value="te-IN">తెలుగు</option>
-    </select>
-    <p class="lang-hint">Tip: you can also just speak or type in your language; the agent switches automatically.</p>
+  <main class="layout">
+    <div class="col-main">
+      <!-- Talk to the agent -->
+      <section class="panel hero">
+        <p class="hero-title">What would you like to eat today?</p>
+        <p class="hero-sub">Tap the button and say it, e.g. <em>“two masala dosa and one filter coffee”</em>.
+          Speak in English, हिन्दी, ಕನ್ನಡ, தமிழ் or తెలుగు and the agent follows your language.</p>
+        <div class="mic-wrap">
+          <button id="micBtn" class="mic">🎤 Tap to speak</button>
+        </div>
+        <p id="status" class="status" aria-live="polite">Ready</p>
+        <label class="toggle">
+          <input type="checkbox" id="speakBox" checked>
+          <span class="toggle-track" aria-hidden="true"></span>
+          <span>🔊 Speak replies</span>
+        </label>
+      </section>
 
-    <button id="micBtn" class="mic">🎤 Tap to speak</button>
-    <p id="status">Ready
-      <label class="speak"><input type="checkbox" id="speakBox" checked> 🔊 Speak replies</label>
-    </p>
+      <!-- Conversation -->
+      <section class="panel chat">
+        <div class="chat-thread">
+          <div class="bubble-row you">
+            <div class="bubble you"><span class="who">You</span><p id="transcript">—</p></div>
+          </div>
+          <div class="bubble-row agent">
+            <span class="avatar" aria-hidden="true">🤖</span>
+            <div class="bubble agent"><span class="who">Agent</span><p id="reply">Hello! Tap the mic or type below to start your order.</p></div>
+          </div>
+        </div>
+        <form id="typedForm" class="composer">
+          <input id="typedInput" type="text" placeholder="Or type your order here…" autocomplete="off" aria-label="Type your order">
+          <button type="submit" aria-label="Send">Send ➤</button>
+        </form>
+      </section>
 
-    <h2>You said</h2>
-    <p id="transcript">—</p>
-
-    <h2>Agent</h2>
-    <p id="reply">—</p>
-
-    <form id="typedForm" class="typed">
-      <input id="typedInput" type="text" placeholder="...or type here to test (uses no voice credits)" autocomplete="off">
-      <button type="submit">Send</button>
-    </form>
-
-    <details id="menuPanel" class="menu-panel">
-      <summary>📖 See the menu (tap a dish to add it)</summary>
-      <div id="menuList" class="menu-list"></div>
-    </details>
-
-    <h2>Your order</h2>
-    <ul id="cart" class="cart"></ul>
-    <p id="taxLine" class="tax-line" hidden></p>
-    <p id="total" class="total"></p>
-
-    <div id="orderBox" class="order-box" hidden></div>
-
-    <div id="paymentSection" class="payment-section" hidden>
-      <h2>Payment &amp; Confirmation</h2>
-      <div class="pay-toggle">
-        <button type="button" id="payUpiBtn" class="pay-btn active">📱 UPI / QR Scanner</button>
-        <button type="button" id="payCashBtn" class="pay-btn">💵 Cash</button>
-      </div>
-
-      <div id="upiBox" class="pay-box">
-        <p class="pay-hint">Scan with any UPI app (Google Pay, PhonePe, Paytm, BHIM):</p>
-        <div id="qrcodeBox" class="qr-container"></div>
-        <img id="gatewayQr" class="gateway-qr" alt="UPI QR code" hidden>
-        <p id="upiDetails" class="upi-details"></p>
-        <a id="upiPayLink" href="#" class="btn-upi-mobile" style="display:none;">Open in UPI App</a>
-        <button type="button" id="confirmUpiBtn" class="btn-action">✅ I Have Paid · Send for Staff Check</button>
-      </div>
-
-      <div id="cashBox" class="pay-box" hidden>
-        <p class="pay-hint" id="cashHint">Pay cash to the staff. The kitchen will confirm your order after collecting payment.</p>
-        <button type="button" id="submitCashBtn" class="btn-action">📨 Submit Order (Pay Cash to Staff)</button>
-      </div>
+      <!-- Menu -->
+      <section id="menuPanel" class="panel">
+        <div class="panel-head">
+          <h2>📖 Menu</h2>
+          <span class="muted small">Tap a dish to add it</span>
+        </div>
+        <div id="menuList" class="menu-list"></div>
+      </section>
     </div>
+
+    <aside class="col-side">
+      <!-- Customer details -->
+      <details class="panel details" open>
+        <summary><h2>👤 Your details</h2><span class="muted small">optional, saves time</span></summary>
+        <div class="customer-info">
+          <div class="field-row">
+            <label for="custName">Name</label>
+            <input id="custName" type="text" placeholder="e.g. Vikas" autocomplete="name">
+          </div>
+          <div class="field-row">
+            <label for="custPhone">Phone</label>
+            <input id="custPhone" type="tel" placeholder="10-digit mobile" maxlength="10" autocomplete="tel" inputmode="numeric">
+          </div>
+          <div class="field-row">
+            <label for="orderType">Order type</label>
+            <select id="orderType">
+              <option value="dine-in">🍽 Dine-in</option>
+              <option value="takeaway">🥡 Takeaway</option>
+            </select>
+          </div>
+          <div class="field-row" id="tableField">
+            <label for="tableNo">Table no.</label>
+            <input id="tableNo" type="text" placeholder="e.g. 1" maxlength="3" inputmode="numeric">
+          </div>
+        </div>
+      </details>
+
+      <!-- Order summary -->
+      <section class="panel summary">
+        <div class="panel-head"><h2>🧾 Your order</h2></div>
+        <ul id="cart" class="cart"></ul>
+        <p id="taxLine" class="tax-line" hidden></p>
+        <p id="total" class="total">Your order is empty</p>
+        <div id="orderBox" class="order-box" hidden></div>
+
+        <div id="paymentSection" class="payment-section" hidden>
+          <h3>Payment</h3>
+          <div class="pay-toggle" role="group" aria-label="Payment method">
+            <button type="button" id="payUpiBtn" class="pay-btn active">📱 UPI</button>
+            <button type="button" id="payCashBtn" class="pay-btn">💵 Cash</button>
+          </div>
+
+          <div id="upiBox" class="pay-box">
+            <p class="pay-hint">Scan with any UPI app: Google Pay, PhonePe, Paytm or BHIM</p>
+            <div id="qrcodeBox" class="qr-container"></div>
+            <img id="gatewayQr" class="gateway-qr" alt="UPI QR code" hidden>
+            <p id="upiDetails" class="upi-details"></p>
+            <a id="upiPayLink" href="#" class="btn-upi-mobile" style="display:none;">Open in UPI app</a>
+            <button type="button" id="confirmUpiBtn" class="btn-action">✅ I have paid · Send for staff check</button>
+          </div>
+
+          <div id="cashBox" class="pay-box" hidden>
+            <p class="pay-hint" id="cashHint">Pay cash to the staff. The kitchen confirms your order after collecting payment.</p>
+            <button type="button" id="submitCashBtn" class="btn-action">📨 Submit order · Pay cash to staff</button>
+          </div>
+        </div>
+      </section>
+    </aside>
   </main>
+
+  <footer class="foot">🔒 Your order goes to the kitchen only after the staff confirm your payment.</footer>
+
   <script src="{{ url_for('static', filename='qrcode.min.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

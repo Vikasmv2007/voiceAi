@@ -196,7 +196,7 @@ function orderCard(order, fresh) {
     metaChips.push(el("span", { class: "chip by" }, "✔ " + (order.confirmed_by === "Razorpay" ? "Paid online" : order.confirmed_by)));
   }
 
-  return el("div", { class: "card" + (fresh ? " fresh" : "") },
+  return el("div", { class: "card status-" + order.status + (fresh ? " fresh" : "") },
     ...(isCashPending ? [el("div", { class: "cash-banner" }, "💵 COLLECT CASH ₹" + order.total + " BEFORE PREPARING")] : []),
     ...(isUpiPending ? [el("div", { class: "upi-banner" }, "📱 CHECK UPI PAYMENT OF ₹" + order.total + " IN YOUR UPI APP BEFORE PREPARING")] : []),
     el("div", { class: "card-head" },

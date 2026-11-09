@@ -4,11 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Restaurant Dashboard</title>
+  <meta name="theme-color" content="#14532d">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
 </head>
 <body>
   <header class="top">
-    <h1>🍽️ {{ restaurant }} · Kitchen</h1>
+    <div class="brand">
+      <span class="brand-logo" aria-hidden="true">🍽️</span>
+      <div><h1>{{ restaurant }}</h1><div class="brand-sub">Kitchen dashboard</div></div>
+    </div>
     <div class="top-right">
       <a class="btn ghost" href="/dashboard/tables" target="_blank">🔳 Table QR codes</a>
       <span id="conn" class="conn">connecting...</span>
@@ -17,18 +24,18 @@
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="live">Live orders</button>
-    <button class="tab" data-tab="history">History</button>
-    <button class="tab" data-tab="menu">Menu</button>
-    <button class="tab" data-tab="stats">Analytics</button>
+    <button class="tab active" data-tab="live">🔥 Live orders</button>
+    <button class="tab" data-tab="history">🕘 History</button>
+    <button class="tab" data-tab="menu">📖 Menu</button>
+    <button class="tab" data-tab="stats">📊 Analytics</button>
   </nav>
 
   <main>
     <section id="tab-live" class="panel">
       <div class="board">
-        <div class="col"><h2>New <span id="count-CONFIRMED" class="count">0</span></h2><div id="col-CONFIRMED"></div></div>
-        <div class="col"><h2>Preparing <span id="count-PREPARING" class="count">0</span></h2><div id="col-PREPARING"></div></div>
-        <div class="col"><h2>Ready <span id="count-READY" class="count">0</span></h2><div id="col-READY"></div></div>
+        <div class="col col-new"><h2><span class="dot"></span>New &amp; awaiting payment <span id="count-CONFIRMED" class="count">0</span></h2><div id="col-CONFIRMED"></div></div>
+        <div class="col col-prep"><h2><span class="dot"></span>Preparing <span id="count-PREPARING" class="count">0</span></h2><div id="col-PREPARING"></div></div>
+        <div class="col col-ready"><h2><span class="dot"></span>Ready <span id="count-READY" class="count">0</span></h2><div id="col-READY"></div></div>
       </div>
     </section>
 

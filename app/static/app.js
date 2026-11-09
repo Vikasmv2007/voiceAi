@@ -102,15 +102,7 @@ function chime(times) {
   }
 }
 
-const bannerStyle = document.createElement("style");
-bannerStyle.textContent = `
-  .order-banner { padding: 14px; margin-bottom: 12px; border-radius: 10px; font-weight: 700; font-size: 1.1rem;
-                  text-align: center; cursor: pointer; background: #dff3e6; color: #12462a; }
-  .order-banner.ready { background: #1b8a4b; color: #fff; animation: bannerflash 1s infinite; }
-  .order-banner.cash { background: #b45309; color: #fff; }
-  .order-banner.bad { background: #b00020; color: #fff; }
-  @keyframes bannerflash { 50% { background: #26b862; } }`;
-document.head.appendChild(bannerStyle);
+// Banner colours live in style.css (they follow light / dark mode).
 
 const banner = document.createElement("div");
 banner.className = "order-banner";
@@ -429,7 +421,15 @@ function renderCart(cart) {
     taxLine.hidden = !(cart.items.length && cart.tax);
     taxLine.textContent = "Subtotal ₹" + cart.subtotal + " + GST " + cart.gst_rate + "% ₹" + cart.tax;
   }
-  totalEl.textContent = cart.items.length ? "Total: ₹" + cart.total : "Your order is empty";
+  if (cart.items.length) {
+    const label = document.createElement("span");
+    label.textContent = "Total";
+    const amount = document.createElement("span");
+    amount.textContent = "₹" + cart.total;
+    totalEl.replaceChildren(label, amount);
+  } else {
+    totalEl.textContent = "Your order is empty";
+  }
 }
 
 // ---- Payment & UPI QR UI ----
