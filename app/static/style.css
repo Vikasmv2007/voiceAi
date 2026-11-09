@@ -74,8 +74,18 @@ h1, h2, h3 { margin: 0; line-height: 1.25; }
   content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .55);
   animation: ring 2s ease-out infinite;
 }
-.mic.recording { background: #ffe1e1; }
-.mic.recording::after { border-color: #fff; animation-duration: .9s; }
+/* hands-free conversation states */
+.mic.live { --level: 0; }
+.mic.live::after { animation: none; transform: scale(calc(1 + var(--level) * .45)); opacity: calc(.35 + var(--level));
+                   transition: transform .08s linear, opacity .08s linear; border-width: 4px; }
+.mic.listen { box-shadow: 0 0 0 6px rgba(255, 255, 255, .25), 0 6px 16px rgba(0, 0, 0, .18); }
+.mic.hear { background: #ffe1e1; }
+.mic.hear::after { border-color: #fff; }
+.mic.think { background: #fff7ed; }
+.mic.think .mic-icon { animation: spin 1.2s linear infinite; display: inline-block; }
+.mic.speak { background: #ecfdf5; }
+.mic.speak::after { animation: ring 1.4s ease-out infinite; transform: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .mic:disabled { cursor: wait; opacity: .85; }
 .mic:disabled::after { display: none; }
 @keyframes ring { from { transform: scale(1); opacity: 1; } to { transform: scale(1.35); opacity: 0; } }

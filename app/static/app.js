@@ -36,9 +36,10 @@ let paymentPoll = null;          // Razorpay QR on screen: ask the server whethe
 
 // ---- Mic button: icon + state (the status line under it says what is happening) ----
 function setMic(state) {
-  const icon = { idle: "🎤", rec: "⏹", busy: "⏳" }[state] || "🎤";
-  const label = { idle: "Tap to speak", rec: "Tap to stop", busy: "Working" }[state] || "Tap to speak";
+  const icon = { idle: "🎤", listen: "🎤", hear: "🎙️", think: "⏳", speak: "🔊" }[state] || "🎤";
+  const label = state === "idle" || !state ? "Tap to start talking" : "Tap to stop the conversation";
   micBtn.replaceChildren(Object.assign(document.createElement("span"), { className: "mic-icon", textContent: icon }));
+  micBtn.className = "mic" + (state && state !== "idle" ? " live " + state : "");
   micBtn.setAttribute("aria-label", label);
   micBtn.title = label;
 }
@@ -211,17 +212,19 @@ function watchOrder(id, initialStatus) {
 // If the customer closed the page and came back, keep watching their order.
 try { JSON.parse(localStorage.getItem("watching") || "[]").forEach((id) => watchOrder(id)); } catch (e) { /* ignore */ }
 
-// ---- Step 5: the agent speaks ----
+// ---- Step 5: the agent speaks (through the page's audio engine, so it also works on iPhones) ----
 const speakBox = document.getElementById("speakBox");
-let currentAudio = null;
+let currentVoice = null;          // { source, done } while the agent is talking
 
 function stopSpeaking() {
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
+  if (currentVoice) {
+    try { currentVoice.source.stop(); } catch (e) { /* already stopped */ }
+    currentVoice.done();
+    currentVoice = null;
   }
 }
 
+// Resolves when the agent has finished talking (or straight away if speech is off / failed).
 async function speak(text, force) {
   if ((!speakBox.checked && !force) || !text) return;
   try {
@@ -234,136 +237,236 @@ async function speak(text, force) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || "voice failed");
     }
-    const blob = await res.blob();
+    unlockAudio();
+    const audio = await audioCtx.decodeAudioData(await res.arrayBuffer());
     stopSpeaking();
-    currentAudio = new Audio(URL.createObjectURL(blob));
-    await currentAudio.play();
+    await new Promise((resolve) => {
+      const source = audioCtx.createBufferSource();
+      source.buffer = audio;
+      source.connect(audioCtx.destination);
+      const voice = { source, done: resolve };
+      source.onended = () => { if (currentVoice === voice) currentVoice = null; resolve(); };
+      currentVoice = voice;
+      source.start();
+    });
   } catch (err) {
     statusEl.textContent = "Voice problem: " + err.message + " (the text reply still works)";
   }
 }
 
-// ---- Convert Audio Blob to 16 kHz Mono 16-bit PCM WAV ----
-async function blobToWav16k(blob) {
-  const arrayBuffer = await blob.arrayBuffer();
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+// ---- Hands-free conversation, like talking to a waiter ----
+// Tap the mic once. The agent listens, notices when you stop talking, replies out loud and
+// listens again by itself. Talk over it to interrupt. Tap the mic again to stop.
+const VAD = {
+  frameMs: 0,              // set from the sample rate
+  startFrames: 3,          // ~130 ms of voice = you started talking
+  silenceMs: 900,          // this much quiet after speaking = you finished
+  minSpeechMs: 350,        // shorter sounds (a cough, a click) are ignored
+  maxSpeechMs: 20000,      // Gnani Prisma takes up to ~30 s per clip
+  idleMs: 25000,           // nobody talks for this long: the agent stops listening
+  preRollMs: 400,          // keep the start of the first word
+  bargeMs: 350,            // talk this long over the agent to interrupt it
+};
+const convo = {
+  on: false, state: "off", stream: null, source: null, proc: null, sink: null,
+  noise: 0.004, loudFrames: 0, quietMs: 0, speechMs: 0, idleMs: 0, bargeLoudMs: 0, bargeQuietMs: 0,
+  preRoll: [], frames: [], errors: 0,
+};
 
-  const targetSampleRate = 16000;
-  const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
-  const source = offlineCtx.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(offlineCtx.destination);
-  source.start(0);
+micBtn.addEventListener("click", () => (convo.on ? endConversation("Stopped. Tap the mic to talk again.") : startConversation()));
 
-  const resampled = await offlineCtx.startRendering();
-  const samples = resampled.getChannelData(0);
-
-  const buffer = new ArrayBuffer(44 + samples.length * 2);
-  const view = new DataView(buffer);
-
-  function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  }
-
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + samples.length * 2, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM format
-  view.setUint16(22, 1, true); // 1 channel (mono)
-  view.setUint32(24, targetSampleRate, true);
-  view.setUint32(28, targetSampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true); // 16-bit
-  writeString(view, 36, 'data');
-  view.setUint32(40, samples.length * 2, true);
-
-  let offset = 44;
-  for (let i = 0; i < samples.length; i++, offset += 2) {
-    let s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-  }
-
-  return new Blob([view], { type: 'audio/wav' });
-}
-
-const MAX_SECONDS = 25; // Prisma REST limit is about 30 seconds
-let mediaRecorder = null;
-let chunks = [];
-let stream = null;
-let autoStop = null;
-
-micBtn.addEventListener("click", () => {
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    stopRecording();
-  } else {
-    startRecording();
-  }
-});
-
-async function startRecording() {
+async function startConversation() {
   unlockAudio();
-  stopSpeaking(); // the agent stops talking when the customer starts
+  stopSpeaking();
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    convo.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    });
   } catch (err) {
     statusEl.textContent = "Microphone blocked. Allow it in the browser address bar.";
     return;
   }
-  chunks = [];
-  mediaRecorder = new MediaRecorder(stream);
-  mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-  mediaRecorder.onstop = handleStop;
-  mediaRecorder.start();
-  micBtn.classList.add("recording");
-  setMic("rec");
-  statusEl.textContent = "Listening...";
-  autoStop = setTimeout(stopRecording, MAX_SECONDS * 1000);
+  convo.on = true;
+  convo.errors = 0;
+  convo.source = audioCtx.createMediaStreamSource(convo.stream);
+  convo.proc = audioCtx.createScriptProcessor(2048, 1, 1);
+  convo.sink = audioCtx.createGain();
+  convo.sink.gain.value = 0;                       // the processor must be connected, but stays silent
+  convo.source.connect(convo.proc);
+  convo.proc.connect(convo.sink).connect(audioCtx.destination);
+  VAD.frameMs = (2048 / audioCtx.sampleRate) * 1000;
+  convo.proc.onaudioprocess = (e) => onAudioFrame(e.inputBuffer.getChannelData(0));
+  listen();
 }
 
-function stopRecording() {
-  clearTimeout(autoStop);
-  if (mediaRecorder && mediaRecorder.state === "recording") mediaRecorder.stop();
+function endConversation(message) {
+  convo.on = false;
+  convo.state = "off";
+  if (convo.proc) { convo.proc.onaudioprocess = null; convo.proc.disconnect(); }
+  if (convo.source) convo.source.disconnect();
+  if (convo.sink) convo.sink.disconnect();
+  if (convo.stream) convo.stream.getTracks().forEach((t) => t.stop());
+  convo.proc = convo.source = convo.sink = convo.stream = null;
+  micBtn.style.removeProperty("--level");
+  setMic("idle");
+  micBtn.disabled = false;
+  if (message) statusEl.textContent = message;
 }
 
-async function handleStop() {
-  stream.getTracks().forEach((t) => t.stop());
-  micBtn.classList.remove("recording");
-  micBtn.disabled = true;
-  setMic("busy");
-  statusEl.textContent = "Understanding your voice...";
-  try {
-    const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-    const wavBlob = await blobToWav16k(blob);
+function setState(state) {
+  convo.state = state;
+  setMic(state);
+  statusEl.textContent = {
+    listen: "Listening… just speak",
+    hear: "Hearing you…",
+    think: "Got it, one moment…",
+    speak: "Speaking… talk anytime to interrupt",
+  }[state] || statusEl.textContent;
+}
 
-    const form = new FormData();
-    form.append("audio", wavBlob, "speech.wav");
-    form.append("language", langSel.value);
+function listen() {
+  if (!convo.on) return;
+  convo.frames = [];
+  convo.bargeLoudMs = convo.bargeQuietMs = 0;
+  convo.loudFrames = convo.quietMs = convo.speechMs = convo.idleMs = 0;
+  setState("listen");
+}
 
-    const res = await fetch("/api/stt", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Something went wrong");
+function rms(buf) {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
 
-    transcriptEl.textContent = data.transcript || "(nothing heard)";
-    if (data.transcript) {
-      await sendTurn(data.transcript);
-    } else {
-      statusEl.textContent = "I couldn't hear anything. Please try again.";
+function onAudioFrame(input) {
+  if (!convo.on) return;
+  const frame = new Float32Array(input);           // the browser reuses its buffer
+  const level = rms(frame);
+  micBtn.style.setProperty("--level", Math.min(1, level * 12).toFixed(2));
+
+  if (convo.state === "speak") {
+    // Interrupting the agent needs a clearly louder voice than its own sound coming back from the speaker.
+    // Speech dips between syllables, so only a real pause (~250 ms) resets the count.
+    const bargeLevel = Math.max(0.06, convo.noise * 8);
+    if (level > bargeLevel) {
+      convo.bargeLoudMs += VAD.frameMs;
+      convo.bargeQuietMs = 0;
+    } else if ((convo.bargeQuietMs += VAD.frameMs) > 250) {
+      convo.bargeLoudMs = 0;
     }
-  } catch (err) {
-    statusEl.textContent = "Error: " + err.message;
-  } finally {
-    micBtn.disabled = false;
-    setMic("idle");
+    keepPreRoll(frame);
+    if (convo.bargeLoudMs >= VAD.bargeMs) {
+      convo.bargeLoudMs = 0;
+      stopSpeaking();                               // like a waiter: stop and listen
+      convo.frames = convo.preRoll.slice();
+      convo.loudFrames = VAD.startFrames;
+      convo.quietMs = 0;
+      convo.speechMs = VAD.bargeMs;
+      setState("hear");
+    }
+    return;
+  }
+
+  if (convo.state === "listen") {
+    const threshold = Math.max(0.012, convo.noise * 3);
+    if (level > threshold) {
+      convo.loudFrames++;
+      keepPreRoll(frame);
+      if (convo.loudFrames >= VAD.startFrames) {
+        convo.frames = convo.preRoll.slice();       // include the start of the first word
+        convo.speechMs = convo.loudFrames * VAD.frameMs;
+        convo.quietMs = 0;
+        setState("hear");
+      }
+    } else {
+      convo.loudFrames = 0;
+      convo.noise = convo.noise * 0.95 + level * 0.05;   // learn the room's background noise
+      keepPreRoll(frame);
+      convo.idleMs += VAD.frameMs;
+      if (convo.idleMs >= VAD.idleMs) endConversation("I stopped listening. Tap the mic when you are ready.");
+    }
+    return;
+  }
+
+  if (convo.state === "hear") {
+    convo.frames.push(frame);
+    convo.speechMs += VAD.frameMs;
+    const threshold = Math.max(0.010, convo.noise * 2.5);
+    convo.quietMs = level > threshold ? 0 : convo.quietMs + VAD.frameMs;
+    if (convo.quietMs >= VAD.silenceMs || convo.speechMs >= VAD.maxSpeechMs) {
+      const voiced = convo.speechMs - convo.quietMs;
+      if (voiced < VAD.minSpeechMs) { listen(); return; }   // just a noise
+      finishUtterance(convo.frames);
+    }
   }
 }
 
+function keepPreRoll(frame) {
+  convo.preRoll.push(frame);
+  const keep = Math.ceil(VAD.preRollMs / VAD.frameMs);
+  while (convo.preRoll.length > keep) convo.preRoll.shift();
+}
+
+async function finishUtterance(frames) {
+  setState("think");
+  try {
+    const wav = pcmToWav16k(frames, audioCtx.sampleRate);
+    const form = new FormData();
+    form.append("audio", wav, "speech.wav");
+    form.append("language", langSel.value);
+    const res = await fetch("/api/stt", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Something went wrong");
+    if (!convo.on) return;
+    if (!data.transcript) { listen(); return; }                // only noise: keep listening quietly
+    convo.errors = 0;
+    transcriptEl.textContent = data.transcript;
+    const result = await sendTurn(data.transcript, undefined, true);
+    if (!convo.on) return;
+    setState("speak");
+    await result.speech;                                     // let the agent finish (or be interrupted)
+    if (!convo.on || convo.state !== "speak") return;        // interrupted: already hearing the customer
+    if (result.data && result.data.submitted) {
+      endConversation("Order sent ✅ Tap the mic if you need anything else.");
+      return;
+    }
+    listen();
+  } catch (err) {
+    convo.errors++;
+    statusEl.textContent = "Error: " + err.message;
+    if (convo.errors >= 2) { endConversation("Error: " + err.message + ". Tap the mic to try again."); return; }
+    setTimeout(listen, 800);
+  }
+}
+
+// Raw microphone samples -> 16 kHz mono 16-bit WAV (what Gnani Prisma expects).
+function pcmToWav16k(frames, rate) {
+  const total = frames.reduce((n, f) => n + f.length, 0);
+  const input = new Float32Array(total);
+  let pos = 0;
+  for (const f of frames) { input.set(f, pos); pos += f.length; }
+  const ratio = rate / 16000;
+  const outLen = Math.floor(total / ratio);
+  const view = new DataView(new ArrayBuffer(44 + outLen * 2));
+  const text = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  text(0, "RIFF"); view.setUint32(4, 36 + outLen * 2, true); text(8, "WAVE"); text(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true); text(36, "data"); view.setUint32(40, outLen * 2, true);
+  for (let i = 0; i < outLen; i++) {
+    // average the samples that fall into this output sample (simple low-pass + downsample)
+    const start = Math.floor(i * ratio), end = Math.min(total, Math.floor((i + 1) * ratio));
+    let sum = 0;
+    for (let j = start; j < end; j++) sum += input[j];
+    const s = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([view], { type: "audio/wav" });
+}
+
 // ---- Step 4: talk to the order brain ----
-async function sendTurn(text, overridePayment) {
+// Returns { data, speech }: speech resolves when the agent has finished saying the reply.
+async function sendTurn(text, overridePayment, fromConversation) {
   unlockAudio();
   statusEl.textContent = "Thinking...";
   const custName = (custNameInput && custNameInput.value.trim()) || undefined;
@@ -396,7 +499,9 @@ async function sendTurn(text, overridePayment) {
   }
   replyEl.textContent = data.reply;
   renderCart(data.cart);
-  speak(data.reply);
+  // Typed or tapped while the hands-free conversation is listening: the agent answers, then keeps listening.
+  if (convo.on && !fromConversation) setState("speak");
+  const speech = speak(data.reply);
 
   // Sync profile details back from order brain
   if (data.customer_name && custNameInput && !custNameInput.value) {
@@ -450,10 +555,18 @@ async function sendTurn(text, overridePayment) {
     chime(1);
     if (paymentSection) paymentSection.hidden = true;
     sessionId = newSessionId(); // the next order starts fresh
-  } else {
+  } else if (!convo.on) {
     statusEl.textContent = "Done · understood by " + data.source;
   }
-  return data;
+  if (convo.on && !fromConversation) {
+    // Typed / tapped during the hands-free conversation: once the agent has answered, listen again.
+    speech.then(() => {
+      if (!convo.on || convo.state !== "speak") return;
+      if (data.submitted) endConversation("Order sent ✅ Tap the mic if you need anything else.");
+      else listen();
+    });
+  }
+  return { data, speech };
 }
 
 function renderCart(cart) {
