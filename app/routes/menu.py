@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from app.db import get_db
+from app.staff import staff_only
 
 bp = Blueprint("menu", __name__, url_prefix="/api")
 
@@ -11,6 +12,7 @@ def get_menu():
 
 
 @bp.route("/menu/<int:item_id>", methods=["PATCH"])
+@staff_only
 def update_menu_item(item_id):
     """Owner changes: mark a dish in/out of stock, or change its price."""
     data = request.get_json(silent=True) or {}

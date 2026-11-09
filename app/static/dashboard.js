@@ -1,6 +1,11 @@
 const LANG_NAMES = { "en-IN": "English", "hi-IN": "हिन्दी", "kn-IN": "ಕನ್ನಡ" };
-const NEXT_STATUS = { AWAITING_CASH: "CONFIRMED", CONFIRMED: "PREPARING", PREPARING: "READY", READY: "DELIVERED" };
-const NEXT_LABEL = { AWAITING_CASH: "✅ Cash Collected → Confirm Order", CONFIRMED: "Start preparing", PREPARING: "Mark ready", READY: "Mark delivered" };
+const NEXT_STATUS = { AWAITING_CASH: "CONFIRMED", AWAITING_UPI: "CONFIRMED", CONFIRMED: "PREPARING", PREPARING: "READY", READY: "DELIVERED" };
+const NEXT_LABEL = { AWAITING_CASH: "✅ Cash Collected → Confirm Order", AWAITING_UPI: "✅ UPI Payment Received → Confirm Order",
+                     CONFIRMED: "Start preparing", PREPARING: "Mark ready", READY: "Mark delivered" };
+// Orders the customer has submitted but the staff have not confirmed yet (payment not checked).
+const AWAITING = ["AWAITING_CASH", "AWAITING_UPI"];
+const isAwaiting = (o) => AWAITING.includes(o.status);
+const placedAt = (o) => o.confirmed_at || o.created_at;
 
 // ---------- small helpers ----------
 
@@ -19,9 +24,25 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-async function api(path, options) {
-  const res = await fetch(path, options);
+// Staff actions (confirm orders, edit the menu) need the STAFF_PIN from .env.
+function staffPin() {
+  try { return localStorage.getItem("staffPin") || ""; } catch (e) { return window._staffPin || ""; }
+}
+function saveStaffPin(pin) {
+  window._staffPin = pin;
+  try { if (pin) localStorage.setItem("staffPin", pin); else localStorage.removeItem("staffPin"); } catch (e) { /* ignore */ }
+}
+
+async function api(path, options, retried) {
+  const opts = Object.assign({}, options || {});
+  opts.headers = Object.assign({}, opts.headers || {}, { "X-Staff-Pin": staffPin() || window._staffPin || "" });
+  const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.staff_pin && !retried) {
+    const pin = prompt(staffPin() ? "Wrong staff PIN. Enter the staff PIN:" : "Enter the staff PIN:");
+    if (pin) { saveStaffPin(pin.trim()); return api(path, options, true); }
+  }
+  if (res.status === 401 && data.staff_pin) saveStaffPin("");
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
@@ -123,14 +144,21 @@ function orderCard(order, fresh) {
     el("li", {}, it.quantity + " × " + it.name,
        it.notes ? el("span", { class: "note" }, "↳ " + it.notes) : ""));
   const isCashPending = order.status === "AWAITING_CASH";
+  const isUpiPending = order.status === "AWAITING_UPI";
   const buttons = [];
   if (NEXT_STATUS[order.status]) {
     buttons.push(el("button", {
-      class: "btn small" + (isCashPending ? " cash-collect" : ""),
-      onclick: () => changeStatus(order.id, NEXT_STATUS[order.status])
+      class: "btn small" + (isCashPending ? " cash-collect" : isUpiPending ? " upi-check" : ""),
+      onclick: () => {
+        if (isUpiPending && !confirm("Order #" + order.id + ": have you seen ₹" + order.total +
+                                     " arrive in your UPI app? Only then confirm.")) return;
+        changeStatus(order.id, NEXT_STATUS[order.status]);
+      }
     }, NEXT_LABEL[order.status]));
   }
-  buttons.push(el("a", { class: "btn small", href: "/bill/" + order.id, target: "_blank" }, "🖨 Bill"));
+  if (!isAwaiting(order)) {        // the bill exists only after the staff confirm the payment
+    buttons.push(el("a", { class: "btn small", href: "/bill/" + order.id, target: "_blank" }, "🖨 Bill"));
+  }
   buttons.push(el("button", { class: "btn small danger", onclick: () => {
     if (confirm("Cancel order #" + order.id + "?")) changeStatus(order.id, "CANCELLED");
   } }, "Cancel"));
@@ -148,9 +176,10 @@ function orderCard(order, fresh) {
 
   return el("div", { class: "card" + (fresh ? " fresh" : "") },
     ...(isCashPending ? [el("div", { class: "cash-banner" }, "💵 COLLECT CASH ₹" + order.total + " BEFORE PREPARING")] : []),
+    ...(isUpiPending ? [el("div", { class: "upi-banner" }, "📱 CHECK UPI PAYMENT OF ₹" + order.total + " IN YOUR UPI APP BEFORE PREPARING")] : []),
     el("div", { class: "card-head" },
       el("strong", {}, "#" + order.id),
-      el("span", { class: "meta" }, clock(order.confirmed_at) + " · " + ago(order.confirmed_at), ...metaChips)),
+      el("span", { class: "meta" }, clock(placedAt(order)) + " · " + ago(placedAt(order)), ...metaChips)),
     el("ul", { class: "lines" }, lines),
     el("div", { class: "card-foot" }, el("span", { class: "total" }, "₹" + order.total), el("span", {}, buttons)));
 }
@@ -161,7 +190,7 @@ async function loadLive() {
     setConnection(true);
     const ids = new Set(orders.map((o) => o.id));
     const newOnes = knownIds === null ? [] : orders.filter((o) => !knownIds.has(o.id));
-    const waiting = orders.filter((o) => o.status === "CONFIRMED" || o.status === "AWAITING_CASH");
+    const waiting = orders.filter((o) => o.status === "CONFIRMED" || isAwaiting(o));
     if (newOnes.length) {
       beep();
       const cashNew = newOnes.filter((o) => o.status === "AWAITING_CASH");
@@ -170,6 +199,11 @@ async function loadLive() {
       if (cashNew.length) {
         msg += ". Cash payment. Please collect " +
           cashNew.map((o) => "rupees " + o.total + " for order number " + o.id).join(" and ") + ".";
+      }
+      const upiNew = newOnes.filter((o) => o.status === "AWAITING_UPI");
+      if (upiNew.length) {
+        msg += ". U P I payment. Please check " +
+          upiNew.map((o) => "rupees " + o.total + " for order number " + o.id).join(" and ") + " in your U P I app.";
       }
       announce(msg);
       lastRing = Date.now();
@@ -193,10 +227,10 @@ async function loadLive() {
     const freshIds = new Set(newOnes.map((o) => o.id));
     knownIds = ids;
     for (const status of ["CONFIRMED", "PREPARING", "READY"]) {
-      const mine = orders.filter((o) => o.status === status || (status === "CONFIRMED" && o.status === "AWAITING_CASH"));
+      const mine = orders.filter((o) => o.status === status || (status === "CONFIRMED" && isAwaiting(o)));
       document.getElementById("count-" + status).textContent = mine.length;
       document.getElementById("col-" + status).replaceChildren(
-        ...(mine.length ? mine.map((o) => orderCard(o, freshIds.has(o.id) || (status === "CONFIRMED" && o.confirmed_at && newestSeconds(o) < 60)))
+        ...(mine.length ? mine.map((o) => orderCard(o, freshIds.has(o.id) || (status === "CONFIRMED" && placedAt(o) && newestSeconds(o) < 60)))
                         : [el("div", { class: "empty" }, "No orders")]));
     }
   } catch (err) {
@@ -205,7 +239,7 @@ async function loadLive() {
 }
 
 function newestSeconds(order) {
-  return (Date.now() - new Date(order.confirmed_at).getTime()) / 1000;
+  return (Date.now() - new Date(placedAt(order)).getTime()) / 1000;
 }
 
 async function changeStatus(id, status) {

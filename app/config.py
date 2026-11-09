@@ -27,4 +27,9 @@ UPI_PAYEE_NAME = os.getenv("UPI_PAYEE_NAME") or RESTAURANT_NAME
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID") or ""
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN") or ""
 PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")      # e.g. https://abc123.ngrok-free.app
-PHONE_DEV = os.getenv("PHONE_DEV") == "1"                              # 1 = skip signature check (local testing ONLY)
+PHONE_DEV = os.getenv("PHONE_DEV") == "1"
+
+# ---- Staff PIN ----
+# Confirming orders (cash collected / UPI received) and editing the menu need this PIN,
+# so a customer cannot confirm their own order by calling the API. Set it in .env.
+STAFF_PIN = (os.getenv("STAFF_PIN") or "").strip()                              # 1 = skip signature check (local testing ONLY)

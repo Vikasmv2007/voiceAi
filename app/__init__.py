@@ -9,6 +9,9 @@ def create_app():
     app.config["DATABASE"] = config.DATABASE
     app.teardown_appcontext(close_db)
     ensure_schema(config.DATABASE)
+    if not config.STAFF_PIN:
+        print("[warning] STAFF_PIN is not set in .env: anyone who can open the site can confirm orders. "
+              "Add STAFF_PIN=1234 (your own number) to .env.")
 
     from app.routes import bill, menu, orders, phone, voice
     app.register_blueprint(menu.bp)

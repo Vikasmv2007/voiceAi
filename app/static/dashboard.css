@@ -83,3 +83,10 @@ a.btn { text-decoration: none; display: inline-block; }
                animation: cashflash 1.2s infinite; }
 @keyframes cashflash { 50% { background: #d97706; } }
 .btn.cash-collect { background: #b45309; font-weight: 700; }
+
+/* UPI orders waiting for the staff to see the money arrive */
+.upi-banner { background: #1d4ed8; color: #fff; font-weight: 700; font-size: .95rem;
+              text-align: center; padding: 8px 12px; border-radius: 8px; margin-bottom: 10px;
+              animation: upiflash 1.2s infinite; }
+@keyframes upiflash { 50% { background: #2563eb; } }
+.btn.upi-check { background: #1d4ed8; font-weight: 700; }

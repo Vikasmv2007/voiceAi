@@ -4,13 +4,17 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
+from app.staff import staff_only
 from app.services.texts import say
 
 bp = Blueprint("orders", __name__, url_prefix="/api")
 
-LIVE = ("AWAITING_CASH", "CONFIRMED", "PREPARING", "READY")
+# Waiting for the staff to check the payment. Only the dashboard can move these to CONFIRMED.
+AWAITING_PAYMENT = ("AWAITING_CASH", "AWAITING_UPI")
+LIVE = AWAITING_PAYMENT + ("CONFIRMED", "PREPARING", "READY")
 # Which status can follow which (the kitchen moves an order forward step by step).
-NEXT = {"AWAITING_CASH": "CONFIRMED", "CONFIRMED": "PREPARING", "PREPARING": "READY", "READY": "DELIVERED"}
+NEXT = {"AWAITING_CASH": "CONFIRMED", "AWAITING_UPI": "CONFIRMED",
+        "CONFIRMED": "PREPARING", "PREPARING": "READY", "READY": "DELIVERED"}
 
 # "Today" means today in India (UTC+5:30), not in UTC.
 TODAY_IST = "date(o.confirmed_at, '+330 minutes') = date('now', '+330 minutes')"
@@ -51,6 +55,7 @@ def _load_orders(db, where, args, newest_first=False, limit=100):
         "customer_phone": r["customer_phone"] if "customer_phone" in r.keys() else None,
         "payment_mode": r["payment_mode"] if "payment_mode" in r.keys() else None,
         "confirmed_at": _iso(r["confirmed_at"]),
+        "created_at": _iso(r["created_at"]),
         "items": by_order.get(r["id"], []),
     } for r in rows]
 
@@ -70,6 +75,7 @@ def order_history():
 
 
 @bp.route("/orders/<int:order_id>/status", methods=["POST"])
+@staff_only
 def change_status(order_id):
     new_status = (request.get_json(silent=True) or {}).get("status", "")
     db = get_db()
@@ -80,9 +86,9 @@ def change_status(order_id):
     allowed = NEXT.get(current) == new_status or (new_status == "CANCELLED" and current in LIVE)
     if not allowed:
         return jsonify({"error": f"Cannot change {current} to {new_status}"}), 400
-    # When cash is collected the kitchen confirms the order: set confirmed_at now
-    # so the bill and history timestamps are correct.
-    if current == "AWAITING_CASH" and new_status == "CONFIRMED":
+    # The staff have the money (cash collected / UPI payment seen): the order is
+    # confirmed now, so the bill and history timestamps are correct.
+    if current in AWAITING_PAYMENT and new_status == "CONFIRMED":
         db.execute("UPDATE orders SET status = ?, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?",
                    (new_status, order_id))
     else:
@@ -158,13 +164,14 @@ def analytics():
 def track_order(order_id):
     """Used by the customer's page to hear "your order is ready". Returns the status and a sentence in their language."""
     row = get_db().execute("SELECT status, confirmed_at, order_type, table_no FROM orders WHERE id = ?", (order_id,)).fetchone()
-    if not row or (not row["confirmed_at"] and row["status"] != "AWAITING_CASH"):
+    if not row or (not row["confirmed_at"] and row["status"] not in AWAITING_PAYMENT):
         return jsonify({"error": "Order not found"}), 404
     lang = request.args.get("lang", "en-IN").split("-")[0]
     if lang not in ("en", "hi", "kn"):
         lang = "en"
     key = {
         "AWAITING_CASH": "order_awaiting_cash",
+        "AWAITING_UPI": "order_awaiting_upi",
         "CONFIRMED": "order_confirmed_kitchen",
         "PREPARING": "order_preparing",
         "READY": "order_ready",

@@ -141,7 +141,7 @@ def turn():
     result = order_engine.handle_turn(
         "call:" + call_sid, text, lang, customer_id=("tel:" + caller) if caller else None,
         channel="phone", serving={"type": "takeaway", "table": None})
-    if result["confirmed"]:
+    if result["submitted"]:
         return _twiml(_play(result["reply"], lang), _play(say(code, "bye"), lang), "<Hangup/>")
     return _twiml(_play(result["reply"], lang), _record(lang, n + 1))
 

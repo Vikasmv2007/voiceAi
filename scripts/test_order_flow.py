@@ -35,8 +35,10 @@ with app.app_context():
     assert "upi://pay" in t8["upi"]["uri"]
 
     t9 = order_engine.handle_turn(sess, "confirm", "en-IN")
-    assert t9["confirmed"] is True
-    print("UPI flow passed! Confirmed Order ID:", t9["order_id"])
+    # The customer can only SUBMIT: the staff confirm after seeing the UPI payment.
+    assert t9["submitted"] is True and t9["confirmed"] is False
+    assert t9["status"] == "AWAITING_UPI"
+    print("UPI flow passed! Submitted Order ID:", t9["order_id"])
 
     # --- Test 2: Full Flow with Cash ---
     sess2 = str(uuid.uuid4())
@@ -47,9 +49,10 @@ with app.app_context():
     order_engine.handle_turn(sess2, "takeaway", "en-IN")
     order_engine.handle_turn(sess2, "9123456789", "en-IN")
     t_cash = order_engine.handle_turn(sess2, "cash", "en-IN")
-    assert t_cash["confirmed"] is True
+    assert t_cash["submitted"] is True and t_cash["confirmed"] is False
+    assert t_cash["status"] == "AWAITING_CASH"
     assert t_cash["payment_mode"] == "cash"
-    print("Cash flow passed! Confirmed Order ID:", t_cash["order_id"])
+    print("Cash flow passed! Submitted Order ID:", t_cash["order_id"])
 
     # --- Test 3: Hindi Language Flow ---
     sess3 = str(uuid.uuid4())
@@ -88,7 +91,33 @@ with app.app_context():
     r = order_engine.handle_turn(s6, "9876543210", "en-IN", **form)
     assert r["awaiting"] == "payment", r["reply"]
     r = order_engine.handle_turn(s6, "upi", "en-IN", **form)
-    assert r["awaiting"] == "upi_confirm" and not r["confirmed"]
+    assert r["awaiting"] == "upi_confirm" and not r["submitted"]
     print("Takeaway passed!")
+
+    # --- Test 7: nobody but the staff can confirm; the kitchen sees nothing until then ---
+    print("\n=== Test 7: Only staff confirm (cash and UPI) ===")
+    from app import config
+    from app.db import get_db
+    config.STAFF_PIN = "4321"
+    client = app.test_client()
+    db = get_db()
+    for oid, waiting in ((t9["order_id"], "AWAITING_UPI"), (t_cash["order_id"], "AWAITING_CASH")):
+        row = db.execute("SELECT status, confirmed_at FROM orders WHERE id = ?", (oid,)).fetchone()
+        assert row["status"] == waiting and row["confirmed_at"] is None
+        assert client.get(f"/bill/{oid}").status_code == 404                  # no bill before payment
+        # Customer tries to confirm or skip ahead: refused without the staff PIN.
+        for status in ("CONFIRMED", "PREPARING"):
+            assert client.post(f"/api/orders/{oid}/status", json={"status": status}).status_code == 401
+        assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"},
+                           headers={"X-Staff-Pin": "wrong"}).status_code == 401
+        # Even the staff cannot jump past the payment check.
+        assert client.post(f"/api/orders/{oid}/status", json={"status": "PREPARING"},
+                           headers={"X-Staff-Pin": "4321"}).status_code == 400
+        r = client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"}, headers={"X-Staff-Pin": "4321"})
+        assert r.status_code == 200, r.json
+        row = db.execute("SELECT status, confirmed_at FROM orders WHERE id = ?", (oid,)).fetchone()
+        assert row["status"] == "CONFIRMED" and row["confirmed_at"]
+        assert client.get(f"/bill/{oid}").status_code == 200
+    print("Only-staff-confirm passed!")
 
     print("\nALL TESTS PASSED!")

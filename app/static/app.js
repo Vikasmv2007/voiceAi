@@ -168,7 +168,7 @@ function watchOrder(id, initialStatus) {
 }
 
 // If the customer closed the page and came back, keep watching their order.
-try { JSON.parse(localStorage.getItem("watching") || "[]").forEach(watchOrder); } catch (e) { /* ignore */ }
+try { JSON.parse(localStorage.getItem("watching") || "[]").forEach((id) => watchOrder(id)); } catch (e) { /* ignore */ }
 
 // ---- Step 5: the agent speaks ----
 const speakBox = document.getElementById("speakBox");
@@ -375,16 +375,19 @@ async function sendTurn(text, overridePayment) {
   // Update QR scanner display if cart has items
   renderPayment(data);
 
-  if (data.confirmed) {
-    if (data.payment_mode === "cash") {
+  // The customer can only SUBMIT. The staff confirm the order on the dashboard after
+  // checking the payment; watchOrder() tells the customer when that happens.
+  if (data.submitted) {
+    if (data.status === "AWAITING_CASH") {
       statusEl.textContent = "Order #" + data.order_id + " submitted ⏳ Awaiting Cash Payment";
-      showBanner("⏳ Order #" + data.order_id + " submitted. Please pay cash to staff. Kitchen will confirm upon payment.", "cash");
-      watchOrder(data.order_id, "AWAITING_CASH");
+      showBanner("⏳ Order #" + data.order_id + " submitted. Please pay ₹" + data.cart.total +
+                 " cash to the staff. Your order is confirmed only after the staff collect it.", "cash");
     } else {
-      statusEl.textContent = "Order #" + data.order_id + " confirmed ✅";
-      showBanner("✅ Order #" + data.order_id + " confirmed (" + (data.payment_mode ? data.payment_mode.toUpperCase() : "PAID") + ")");
-      watchOrder(data.order_id, "CONFIRMED");
+      statusEl.textContent = "Order #" + data.order_id + " submitted ⏳ Staff are checking your UPI payment";
+      showBanner("⏳ Order #" + data.order_id + " submitted. The staff are checking your UPI payment of ₹" +
+                 data.cart.total + ". Your order is confirmed only after they see it.", "cash");
     }
+    watchOrder(data.order_id, data.status);
     chime(1);
     if (paymentSection) paymentSection.hidden = true;
     sessionId = newSessionId(); // the next order starts fresh
@@ -423,7 +426,7 @@ if (payCashBtn) {
 function renderPayment(data) {
   if (!paymentSection) return;
   const hasItems = data.cart && data.cart.items && data.cart.items.length > 0;
-  if (!hasItems || data.confirmed) {
+  if (!hasItems || data.submitted) {
     paymentSection.hidden = true;
     return;
   }
@@ -456,17 +459,6 @@ function renderPayment(data) {
     }
   }
 
-  // Everything is collected and paid: the order was read back and needs one
-  // last explicit "yes" before it goes to the kitchen.
-  const finalStep = data.awaiting === "final_confirm";
-  if (confirmUpiBtn) confirmUpiBtn.textContent = finalStep ? "\u2705 Yes, Place My Order" : "\u2705 I Have Paid \u00b7 Place Order";
-  if (submitCashBtn) submitCashBtn.textContent = finalStep ? "\u2705 Yes, Place My Order" : "\ud83d\udce8 Submit Order (Pay Cash to Staff)";
-  if (qrcodeBox) qrcodeBox.hidden = finalStep;
-  if (finalStep) {
-    if (upiDetails) upiDetails.textContent = "Payment received \u2705 Confirm your order below.";
-    if (upiPayLink) upiPayLink.style.display = "none";
-    if (cashHint) cashHint.textContent = "Confirm your order below. The kitchen starts only after you say yes.";
-  }
 }
 
 if (confirmUpiBtn) {

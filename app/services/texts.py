@@ -65,6 +65,8 @@ T = {
         "pay_cash_selected": "Payment mode set to Cash. Please pay ₹{total} at the counter or to the staff.",
         "cash_submitted": "Your order number is {id}. Total ₹{total}. Please pay cash to the staff. The kitchen will confirm your order once collected.",
         "order_awaiting_cash": "Your order number {id} is placed. Waiting for cash payment.",
+        "upi_submitted": "Thank you! Your order number is {id}. Total ₹{total}. The staff will check your UPI payment and then confirm your order.",
+        "order_awaiting_upi": "Your order number {id} is placed. The staff are checking your UPI payment.",
         "order_confirmed_kitchen": "Your order number {id} has been confirmed by the kitchen!",
     },
     "hi": {
@@ -127,6 +129,8 @@ T = {
         "pay_cash_selected": "भुगतान का माध्यम नकद चुना गया है। कृपया काउंटर पर या स्टाफ को ₹{total} दें।",
         "cash_submitted": "आपका ऑर्डर नंबर {id} है। कुल ₹{total}। कृपया स्टाफ को नकद दें। भुगतान के बाद किचन आपका ऑर्डर कन्फर्म करेगा।",
         "order_awaiting_cash": "आपका ऑर्डर नंबर {id} दर्ज हो गया है। नकद भुगतान की प्रतीक्षा है।",
+        "upi_submitted": "धन्यवाद! आपका ऑर्डर नंबर {id} है। कुल ₹{total}। स्टाफ आपका UPI भुगतान जाँचकर आपका ऑर्डर कन्फर्म करेगा।",
+        "order_awaiting_upi": "आपका ऑर्डर नंबर {id} दर्ज हो गया है। स्टाफ आपका UPI भुगतान जाँच रहा है।",
         "order_confirmed_kitchen": "किचन ने आपका ऑर्डर नंबर {id} कन्फर्म कर दिया है!",
     },
     "kn": {
@@ -189,6 +193,8 @@ T = {
         "pay_cash_selected": "ಪಾವತಿ ವಿಧಾನ ನಗದು ಎಂದು ನಿಗದಿಯಾಗಿದೆ. ದಯವಿಟ್ಟು ಕೌಂಟರ್‌ನಲ್ಲಿ ಅಥವಾ ಸಿಬ್ಬಂದಿಗೆ ₹{total} ನೀಡಿ.",
         "cash_submitted": "ನಿಮ್ಮ ಆರ್ಡರ್ ಸಂಖ್ಯೆ {id}. ಒಟ್ಟು ₹{total}. ದಯವಿಟ್ಟು ಸಿಬ್ಬಂದಿಗೆ ನಗದು ನೀಡಿ. ಪಾವತಿಯ ನಂತರ ಕಿಚನ್ ನಿಮ್ಮ ಆರ್ಡರ್ ಕನ್ಫರ್ಮ್ ಮಾಡುತ್ತದೆ.",
         "order_awaiting_cash": "ನಿಮ್ಮ ಆರ್ಡರ್ ಸಂಖ್ಯೆ {id} ದಾಖಲಾಗಿದೆ. ನಗದು ಪಾವತಿಗಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ.",
+        "upi_submitted": "ಧನ್ಯವಾದಗಳು! ನಿಮ್ಮ ಆರ್ಡರ್ ಸಂಖ್ಯೆ {id}. ಒಟ್ಟು ₹{total}. ಸಿಬ್ಬಂದಿ ನಿಮ್ಮ ಯುಪಿಐ ಪಾವತಿಯನ್ನು ಪರಿಶೀಲಿಸಿ ಆರ್ಡರ್ ಕನ್ಫರ್ಮ್ ಮಾಡುತ್ತಾರೆ.",
+        "order_awaiting_upi": "ನಿಮ್ಮ ಆರ್ಡರ್ ಸಂಖ್ಯೆ {id} ದಾಖಲಾಗಿದೆ. ಸಿಬ್ಬಂದಿ ನಿಮ್ಮ ಯುಪಿಐ ಪಾವತಿಯನ್ನು ಪರಿಶೀಲಿಸುತ್ತಿದ್ದಾರೆ.",
         "order_confirmed_kitchen": "ಕಿಚನ್‌ನಿಂದ ನಿಮ್ಮ ಆರ್ಡರ್ ಸಂಖ್ಯೆ {id} ಕನ್ಫರ್ಮ್ ಆಗಿದೆ!",
     },
 }

@@ -33,6 +33,6 @@ with app.app_context():
         cart = result["cart"]
         if cart["items"]:
             print("   cart:", ", ".join(f'{i["quantity"]}x {i["name"]}' for i in cart["items"]), f'| total ₹{cart["total"]}')
-        if result["confirmed"]:
-            print(f'   *** ORDER #{result["order_id"]} CONFIRMED ***')
+        if result["submitted"]:
+            print(f'   *** ORDER #{result["order_id"]} SUBMITTED ({result["status"]}) - the staff confirm it on the dashboard ***')
             session = str(uuid.uuid4())

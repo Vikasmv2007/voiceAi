@@ -1,9 +1,11 @@
 """The order brain: keeps the cart, follows the rules, decides the reply.
 
 Golden rule: an order stays DRAFT until the customer says an explicit "yes"
-AFTER hearing the read-back and completing serving/payment steps. Only then
-it becomes CONFIRMED (and will show on the kitchen dashboard). Prices ALWAYS
-come from the database.
+AFTER hearing the read-back and completing serving/payment steps. It is then
+SUBMITTED as AWAITING_CASH or AWAITING_UPI. The customer can never confirm it:
+only the staff, on the dashboard, after they have the money (cash in hand, or
+the UPI payment seen in their UPI app), moves it to CONFIRMED and the kitchen
+starts. Prices ALWAYS come from the database.
 """
 import urllib.parse
 from app import config
@@ -201,7 +203,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
     else:
         parsed = nlu.parse(text, menu, lang, context)
     intent = parsed["intent"]
-    confirmed = False
+    submitted = None        # "AWAITING_CASH" / "AWAITING_UPI" once the order is handed to the staff
 
     # The customer is answering "which one?" -> reuse the quantity they gave before.
     if awaiting == "clarify" and st.get("pending") and intent == "order":
@@ -236,7 +238,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
 
 
     def try_place():
-        nonlocal confirmed
+        nonlocal submitted
         lines_now = _lines(db, order_id)
         if not lines_now:
             parts.append(say(lang, "empty_ask"))
@@ -293,28 +295,21 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
                 st["ready"] = True
                 return "upi_confirm"
 
-        # All requirements satisfied. Place the order now.
-        # Cash orders go to AWAITING_CASH (no confirmed_at) so the kitchen must
-        # collect cash and click "Cash Collected" before they start preparing.
-        # UPI orders are confirmed immediately — payment was already received.
+        # All details collected: SUBMIT the order. It is NOT confirmed yet and the
+        # kitchen does not start: confirmed_at stays empty until the staff check the
+        # payment on the dashboard ("Cash Collected" / "UPI Payment Received").
         sv = st["serving"]
         is_cash = st.get("payment_mode") == "cash"
-        if is_cash:
-            db.execute("UPDATE orders SET status = 'AWAITING_CASH', language = ?, order_type = ?, table_no = ?,"
-                       " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
-                       " payment_mode = ? WHERE id = ?",
-                       (language_code, sv["type"], sv["table"], customer_id, channel,
-                        st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
-            parts.append(say(lang, "cash_submitted", id=order_id, total=total) + " " + serving_sentence())
-        else:
-            db.execute("UPDATE orders SET status = 'CONFIRMED', language = ?, order_type = ?, table_no = ?,"
-                       " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
-                       " payment_mode = ?, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                       (language_code, sv["type"], sv["table"], customer_id, channel,
-                        st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
-            parts.append(say(lang, "confirmed", id=order_id, total=total) + " " + serving_sentence())
+        status = "AWAITING_CASH" if is_cash else "AWAITING_UPI"
+        db.execute("UPDATE orders SET status = ?, language = ?, order_type = ?, table_no = ?,"
+                   " customer_id = ?, channel = ?, customer_name = ?, customer_phone = ?,"
+                   " payment_mode = ? WHERE id = ?",
+                   (status, language_code, sv["type"], sv["table"], customer_id, channel,
+                    st.get("customer_name"), st.get("customer_phone"), st.get("payment_mode"), order_id))
         db.commit()
-        confirmed = True
+        key = "cash_submitted" if is_cash else "upi_submitted"
+        parts.append(say(lang, key, id=order_id, total=total) + " " + serving_sentence())
+        submitted = status
         return None
 
     wants_checkout = intent == "confirm" and mm.contains(mm.clean(text), nlu.PLACE_ORDER)
@@ -700,7 +695,7 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
             "uri": uri,
         }
 
-    if confirmed:
+    if submitted:
         SESSIONS.pop(session_id, None)      # fresh start for the next order
     else:
         st["awaiting"] = new_awaiting
@@ -715,13 +710,17 @@ def handle_turn(session_id, text, language_code="en-IN", customer_id=None, chann
         "reply": reply,
         "intent": intent,
         "source": parsed.get("source", "rules"),
-        "awaiting": None if confirmed else (new_awaiting if new_awaiting is not None else None),
-        "confirmed": confirmed,
+        "awaiting": None if submitted else new_awaiting,
+        # The customer can only SUBMIT. "confirmed" is always False here: only the
+        # staff confirm an order, from the dashboard, after checking the payment.
+        "submitted": bool(submitted),
+        "status": submitted or "DRAFT",
+        "confirmed": False,
         "order_id": order_id,
         "cart": cart,
         "customer_name": st.get("customer_name"),
         "customer_phone": st.get("customer_phone"),
         "payment_mode": st.get("payment_mode"),
-        "serving": None if confirmed else dict(st["serving"]),
+        "serving": None if submitted else dict(st["serving"]),
         "upi": upi_payload,
     }
