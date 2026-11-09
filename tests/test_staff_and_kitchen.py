@@ -8,8 +8,36 @@ from app.staff import create_account
 from tests.conftest import CHECKOUT, item_id, order_row
 
 
+PIN = "4321"
+WITH_PIN = {"X-Staff-Pin": PIN, "X-Confirm-Pin": PIN}
+
+
 def submit(chat, pay="cash"):
     return chat(CHECKOUT + [pay] + (["confirm"] if pay == "upi" else []))[-1]
+
+
+def set_status(client, oid, status):
+    """What the dashboard sends (the PIN is typed for each payment confirmation)."""
+    return client.post(f"/api/orders/{oid}/status", json={"status": status}, headers=WITH_PIN)
+
+
+def test_payment_confirmation_always_needs_the_pin(client, chat, monkeypatch):
+    oid = submit(chat)["order_id"]
+    # No STAFF_PIN in .env: a payment cannot be confirmed at all.
+    r = set_status(client, oid, "CONFIRMED")
+    assert r.status_code == 403 and "STAFF_PIN" in r.json["error"]
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
+    # Staff PIN remembered by the dashboard is NOT enough: the PIN must be typed for this confirmation.
+    r = client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"}, headers={"X-Staff-Pin": PIN})
+    assert r.status_code == 401 and r.json["confirm_pin"]
+    r = client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"},
+                    headers={"X-Staff-Pin": PIN, "X-Confirm-Pin": "0000"})
+    assert r.status_code == 401 and order_row(oid)["status"] == "AWAITING_CASH"
+    assert set_status(client, oid, "CONFIRMED").status_code == 200
+    assert order_row(oid)["status"] == "CONFIRMED"
+    # Later kitchen steps do not ask for the PIN again (the remembered staff PIN is enough).
+    assert client.post(f"/api/orders/{oid}/status", json={"status": "PREPARING"},
+                       headers={"X-Staff-Pin": PIN}).status_code == 200
 
 
 def test_customer_cannot_confirm_with_pin(client, chat, monkeypatch):
@@ -18,11 +46,11 @@ def test_customer_cannot_confirm_with_pin(client, chat, monkeypatch):
         oid = submit(chat, pay)["order_id"]
         assert order_row(oid)["status"] == waiting
         assert client.get(f"/bill/{oid}").status_code == 404
-        for status in ("CONFIRMED", "PREPARING"):
+        for status in ("CONFIRMED", "PREPARING"):       # the customer has no PIN
             assert client.post(f"/api/orders/{oid}/status", json={"status": status}).status_code == 401
         assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"},
                            headers={"X-Staff-Pin": "wrong"}).status_code == 401
-        pin = {"X-Staff-Pin": "4321"}
+        pin = WITH_PIN
         assert client.post(f"/api/orders/{oid}/status", json={"status": "PREPARING"}, headers=pin).status_code == 400
         assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"}, headers=pin).status_code == 200
         row = order_row(oid)
@@ -31,7 +59,8 @@ def test_customer_cannot_confirm_with_pin(client, chat, monkeypatch):
         assert client.get(f"/bill/{oid}").status_code == 200
 
 
-def test_staff_logins_and_roles(app, client, chat):
+def test_staff_logins_and_roles(app, client, chat, monkeypatch):
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
     create_account(get_db(), "owner1", "secret123", "owner")
     create_account(get_db(), "cook", "secret123", "staff")
     assert client.get("/dashboard").status_code == 302                 # must log in
@@ -40,7 +69,10 @@ def test_staff_logins_and_roles(app, client, chat):
     assert client.post("/login", data={"username": "cook", "password": "bad"}).status_code == 200
     assert client.post("/login", data={"username": "cook", "password": "secret123"}).status_code == 302
     assert client.get("/dashboard").status_code == 200
-    assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"}).status_code == 200
+    # Logged in, but confirming a payment still needs the PIN typed now.
+    assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"}).status_code == 401
+    assert client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"},
+                       headers={"X-Confirm-Pin": PIN}).status_code == 200
     assert order_row(oid)["confirmed_by"] == "cook"
     # Staff cannot edit the menu; the owner can.
     assert client.patch(f"/api/menu/{item_id('Idli')}", json={"price": 25}).status_code == 403
@@ -49,20 +81,22 @@ def test_staff_logins_and_roles(app, client, chat):
     assert client.patch(f"/api/menu/{item_id('Idli')}", json={"price": 25}).json["price"] == 25
 
 
-def test_stock_goes_down_on_confirm_and_comes_back_on_cancel(client, chat):
+def test_stock_goes_down_on_confirm_and_comes_back_on_cancel(client, chat, monkeypatch):
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
     vada = item_id("Medu Vada")
     get_db().execute("UPDATE menu_items SET stock = 2 WHERE id = ?", (vada,))
     get_db().commit()
     r = chat(["I am Ravi", "two vada", "no", "that's all", "yes", "takeaway", "9876543210", "cash"])
     oid = r[-1]["order_id"]
-    client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"})
+    set_status(client, oid, "CONFIRMED")
     row = get_db().execute("SELECT stock, available FROM menu_items WHERE id = ?", (vada,)).fetchone()
     assert (row["stock"], row["available"]) == (0, 0)                 # sold out automatically
-    client.post(f"/api/orders/{oid}/status", json={"status": "CANCELLED"})
+    set_status(client, oid, "CANCELLED")
     assert get_db().execute("SELECT stock FROM menu_items WHERE id = ?", (vada,)).fetchone()["stock"] == 2
 
 
-def test_customer_cancel_and_feedback(client, chat):
+def test_customer_cancel_and_feedback(client, chat, monkeypatch):
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
     r = submit(chat)
     oid = r["order_id"]
     sid = order_row(oid)["session_id"]
@@ -73,11 +107,11 @@ def test_customer_cancel_and_feedback(client, chat):
     assert order_row(other)["status"] == "CANCELLED"
     # Once confirmed, the customer can no longer cancel; after it is served they can rate it.
     for status in ("CONFIRMED",):
-        client.post(f"/api/orders/{oid}/status", json={"status": status})
+        set_status(client, oid, status)
     assert client.post(f"/api/orders/{oid}/customer-cancel", json={"session_id": sid}).status_code == 400
     assert client.post(f"/api/orders/{oid}/feedback", json={"session_id": sid, "rating": 5}).status_code == 400
     for status in ("PREPARING", "READY"):
-        client.post(f"/api/orders/{oid}/status", json={"status": status})
+        set_status(client, oid, status)
     assert client.post(f"/api/orders/{oid}/feedback", json={"session_id": sid, "rating": 9}).status_code == 400
     assert client.post(f"/api/orders/{oid}/feedback",
                        json={"session_id": sid, "rating": 4, "comment": "Tasty"}).status_code == 200
@@ -86,6 +120,7 @@ def test_customer_cancel_and_feedback(client, chat):
 
 
 def test_messages_sent_on_status_change(client, chat, monkeypatch):
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
     sent = []
     monkeypatch.setattr(config, "TWILIO_ACCOUNT_SID", "AC1")
     monkeypatch.setattr(config, "TWILIO_AUTH_TOKEN", "t")
@@ -95,17 +130,18 @@ def test_messages_sent_on_status_change(client, chat, monkeypatch):
                         lambda target, args, daemon: type("T", (), {"start": lambda self: target(*args)})())
     oid = submit(chat)["order_id"]
     for status in ("CONFIRMED", "PREPARING", "READY"):
-        client.post(f"/api/orders/{oid}/status", json={"status": status})
+        set_status(client, oid, status)
     assert [to for to, _ in sent] == ["919876543210", "919876543210"]   # confirmed + ready
     assert "confirmed" in sent[0][1] and "minutes" in sent[0][1] and "pickup" in sent[1][1]
 
 
 def test_bill_gst_and_kot(client, chat, monkeypatch):
+    monkeypatch.setattr(config, "STAFF_PIN", PIN)
     monkeypatch.setattr(config, "GST_RATE", 5)
     monkeypatch.setattr(config, "GSTIN", "29ABCDE1234F1Z5")
     r = chat(["I am Ravi", "two masala dosa", "no", "that's all", "yes", "takeaway", "9876543210", "cash"])
     oid = r[-1]["order_id"]
-    client.post(f"/api/orders/{oid}/status", json={"status": "CONFIRMED"})
+    set_status(client, oid, "CONFIRMED")
     html = client.get(f"/bill/{oid}").get_data(as_text=True)
     for text in ("TAX INVOICE", "29ABCDE1234F1Z5", "CGST @ 2.5%", "SGST @ 2.5%", "₹120", "₹126", f"{oid:06d}"):
         assert text in html

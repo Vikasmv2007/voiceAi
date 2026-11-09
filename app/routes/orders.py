@@ -1,8 +1,10 @@
 """Kitchen dashboard API: live orders, history, status changes, daily stats."""
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
+from app import config
 from app.db import get_db
 from app.ratelimit import limit
 from app.services import kitchen
@@ -77,7 +79,17 @@ def order_history():
 @staff_only
 def change_status(order_id):
     new_status = (request.get_json(silent=True) or {}).get("status", "")
-    ok, error = kitchen.change_status(get_db(), order_id, new_status, by=staff_name() or "staff")
+    db = get_db()
+    row = db.execute("SELECT status FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if row and new_status == "CONFIRMED" and row["status"] in AWAITING_PAYMENT:
+        # Cash collected / UPI received: the staff must type the secret PIN EVERY time (never remembered).
+        if not config.STAFF_PIN:
+            return jsonify({"error": "Set STAFF_PIN in the .env file and restart the app. "
+                                     "Confirming a payment needs the staff PIN."}), 403
+        given = request.headers.get("X-Confirm-Pin", "")
+        if not hmac.compare_digest(given.encode(), config.STAFF_PIN.encode()):
+            return jsonify({"error": "Wrong staff PIN. The order was NOT confirmed.", "confirm_pin": True}), 401
+    ok, error = kitchen.change_status(db, order_id, new_status, by=staff_name() or "staff")
     if not ok:
         return jsonify({"error": error}), 404 if error == "Order not found" else 400
     return jsonify({"id": order_id, "status": new_status})
