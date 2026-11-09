@@ -1,29 +1,40 @@
 import re
 
 from flask import Blueprint, request, jsonify, Response
+
+from app import config
+from app.ratelimit import limit
 from app.services import gnani_stt, gnani_tts, order_engine
 
 bp = Blueprint("voice", __name__, url_prefix="/api")
 
 
+MAX_AUDIO_BYTES = 3 * 1024 * 1024        # about a minute of speech
+
+
 @bp.route("/stt", methods=["POST"])
+@limit("voice", "RATE_LIMIT_VOICE")
 def stt():
     audio = request.files.get("audio")
     if not audio:
         return jsonify({"error": "No audio received"}), 400
+    data = audio.read(MAX_AUDIO_BYTES + 1)
+    if len(data) > MAX_AUDIO_BYTES:
+        return jsonify({"error": "Recording is too long"}), 413
     language = request.form.get("language", "en-IN")
     try:
-        result = gnani_stt.transcribe(audio.read(), language)
+        result = gnani_stt.transcribe(data, language)
     except gnani_stt.SttError as e:
         return jsonify({"error": str(e)}), 502
     return jsonify(result)
 
 
 @bp.route("/turn", methods=["POST"])
+@limit("turn", "RATE_LIMIT_TURN")
 def turn():
     data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
-    session_id = data.get("session_id") or ""
+    text = str(data.get("text") or "").strip()[:config.MAX_TEXT_CHARS]
+    session_id = str(data.get("session_id") or "")[:64]
     if not text or not session_id:
         return jsonify({"error": "text and session_id are required"}), 400
     # Optional: who is ordering (browser id, for "same as last time") and a table number from a QR code.
@@ -53,11 +64,14 @@ def turn():
 
 
 @bp.route("/tts", methods=["POST"])
+@limit("voice", "RATE_LIMIT_VOICE")
 def tts():
     data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
+    text = str(data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text is required"}), 400
+    if len(text) > 600:                     # replies are short; longer text is someone abusing the API
+        return jsonify({"error": "text is too long"}), 413
     try:
         audio, mime = gnani_tts.synthesize(text, data.get("language", "en-IN"))
     except gnani_tts.TtsError as e:

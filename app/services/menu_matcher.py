@@ -3,7 +3,7 @@ import difflib
 import re
 import unicodedata
 
-# Number words in English, Hindi and Kannada (Latin and native script).
+# Number words in English, Hindi, Kannada, Tamil and Telugu (Latin and native script).
 NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
@@ -15,7 +15,17 @@ NUMBER_WORDS = {
     "छह": 6, "छः": 6, "सात": 7, "आठ": 8, "नौ": 9, "दस": 10,
     "ಒಂದು": 1, "ಎರಡು": 2, "ಮೂರು": 3, "ನಾಲ್ಕು": 4, "ಐದು": 5,
     "ಆರು": 6, "ಏಳು": 7, "ಎಂಟು": 8, "ಒಂಬತ್ತು": 9, "ಹತ್ತು": 10,
+    # Tamil
+    "onnu": 1, "rendu": 2, "moonu": 3, "naalu": 4, "anju": 5, "ezhu": 7, "ettu": 8, "onbadhu": 9, "pathu": 10,
+    "ஒன்று": 1, "ஒரு": 1, "இரண்டு": 2, "ரெண்டு": 2, "மூன்று": 3, "மூணு": 3, "நான்கு": 4, "நாலு": 4,
+    "ஐந்து": 5, "அஞ்சு": 5, "ஆறு": 6, "ஏழு": 7, "எட்டு": 8, "ஒன்பது": 9, "பத்து": 10,
+    # Telugu
+    "okati": 1, "moodu": 3, "naalugu": 4, "edu": 7, "enimidi": 8, "tommidi": 9, "padi": 10,
+    "ఒకటి": 1, "ఒక": 1, "రెండు": 2, "మూడు": 3, "నాలుగు": 4, "ఐదు": 5,
+    "ఆరు": 6, "ఏడు": 7, "ఎనిమిది": 8, "తొమ్మిది": 9, "పది": 10,
 }
+
+NAME_FIELDS = ("name_en", "name_kn", "name_hi", "name_ta", "name_te")
 
 # Different spellings of the same word (used to spot "dosa" in "dose", "dosai").
 SYNONYMS = {"dose": "dosa", "dosai": "dosa", "idly": "idli", "iddli": "idli"}
@@ -67,7 +77,7 @@ def tokens(text):
 
 
 def variants(item):
-    names = [item["name_en"], item["name_kn"], item["name_hi"]]
+    names = [item.get(f) for f in NAME_FIELDS]
     names += (item["aliases"] or "").split(",")
     out = [clean(n) for n in names if n and clean(n)]
     return list(dict.fromkeys(out))
@@ -117,8 +127,8 @@ def generic_words(menu):
     If a customer says only 'dosa', we must ask which one."""
     found = {}
     for item in menu:
-        for field in ("name_en", "name_kn", "name_hi"):
-            for w in set(clean(item[field]).split()):
+        for field in NAME_FIELDS:
+            for w in set(clean(item.get(field) or "").split()):
                 if len(w) >= 3:
                     found.setdefault(w, {})[item["id"]] = item
     return {w: list(items.values()) for w, items in found.items() if len(items) >= 2}
@@ -143,6 +153,23 @@ def find_ambiguous(text, claimed, menu):
         if match:
             result.append({"start": s, "end": e, "candidates": match})
     return result
+
+
+def parse_addons(item):
+    """'Extra Cheese:15, Extra Chutney:10' -> [("Extra Cheese", 15), ("Extra Chutney", 10)]."""
+    out = []
+    for part in (item.get("addons") or "").split(","):
+        name, colon, price = part.partition(":")
+        name = name.strip()
+        try:
+            price = int(price.strip())
+        except ValueError:
+            continue
+        if not colon:
+            continue
+        if name and 0 <= price <= 5000:
+            out.append((name, price))
+    return out
 
 
 def number_tokens(text, lang):

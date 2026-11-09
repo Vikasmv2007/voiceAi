@@ -1,4 +1,4 @@
-const LANG_NAMES = { "en-IN": "English", "hi-IN": "हिन्दी", "kn-IN": "ಕನ್ನಡ" };
+const LANG_NAMES = { "en-IN": "English", "hi-IN": "हिन्दी", "kn-IN": "ಕನ್ನಡ", "ta-IN": "தமிழ்", "te-IN": "తెలుగు" };
 const NEXT_STATUS = { AWAITING_CASH: "CONFIRMED", AWAITING_UPI: "CONFIRMED", CONFIRMED: "PREPARING", PREPARING: "READY", READY: "DELIVERED" };
 const NEXT_LABEL = { AWAITING_CASH: "✅ Cash Collected → Confirm Order", AWAITING_UPI: "✅ UPI Payment Received → Confirm Order",
                      CONFIRMED: "Start preparing", PREPARING: "Mark ready", READY: "Mark delivered" };
@@ -38,6 +38,10 @@ async function api(path, options, retried) {
   opts.headers = Object.assign({}, opts.headers || {}, { "X-Staff-Pin": staffPin() || window._staffPin || "" });
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.login && !data.staff_pin) {     // staff accounts: go and log in
+    location.href = "/login?next=" + encodeURIComponent(location.pathname);
+    throw new Error("Please log in");
+  }
   if (res.status === 401 && data.staff_pin && !retried) {
     const pin = prompt(staffPin() ? "Wrong staff PIN. Enter the staff PIN:" : "Enter the staff PIN:");
     if (pin) { saveStaffPin(pin.trim()); return api(path, options, true); }
@@ -130,6 +134,14 @@ function servingSpoken(order) {
   return who + (order.table_no ? "table " + order.table_no : "dine in");
 }
 
+// Who is logged in (staff accounts) -> name + log out button in the header.
+fetch("/api/me").then((r) => r.json()).then((me) => {
+  if (!me.staff || me.staff.name === "PIN") return;
+  document.querySelector(".top-right").append(
+    el("span", { class: "who" }, "👤 " + me.staff.name + " (" + me.staff.role + ")"),
+    el("a", { class: "btn ghost", href: "/logout" }, "Log out"));
+}).catch(() => {});
+
 const alertBar = el("div", { class: "alert-bar", hidden: "" });
 document.querySelector("header.top").after(alertBar);
 let lastRing = 0;
@@ -142,6 +154,7 @@ let knownReady = null;
 function orderCard(order, fresh) {
   const lines = order.items.map((it) =>
     el("li", {}, it.quantity + " × " + it.name,
+       it.addons ? el("span", { class: "addon" }, "+ " + it.addons) : "",
        it.notes ? el("span", { class: "note" }, "↳ " + it.notes) : ""));
   const isCashPending = order.status === "AWAITING_CASH";
   const isUpiPending = order.status === "AWAITING_UPI";
@@ -156,7 +169,8 @@ function orderCard(order, fresh) {
       }
     }, NEXT_LABEL[order.status]));
   }
-  if (!isAwaiting(order)) {        // the bill exists only after the staff confirm the payment
+  if (!isAwaiting(order)) {        // the bill and kitchen ticket exist only after the payment is confirmed
+    buttons.push(el("a", { class: "btn small", href: "/kot/" + order.id + "?print=1", target: "_blank" }, "🧾 KOT"));
     buttons.push(el("a", { class: "btn small", href: "/bill/" + order.id, target: "_blank" }, "🖨 Bill"));
   }
   buttons.push(el("button", { class: "btn small danger", onclick: () => {
@@ -172,6 +186,14 @@ function orderCard(order, fresh) {
   }
   if (order.customer_name) {
     metaChips.push(el("span", { class: "chip customer" }, "👤 " + order.customer_name + (order.customer_phone ? " · " + order.customer_phone : "")));
+  }
+  if (order.eta_minutes && ["CONFIRMED", "PREPARING"].includes(order.status) && order.confirmed_at) {
+    const left = Math.round(order.eta_minutes - (Date.now() - new Date(order.confirmed_at).getTime()) / 60000);
+    metaChips.push(el("span", { class: "chip eta" + (left < 0 ? " late" : "") },
+      left < 0 ? "⏱ " + (-left) + " min late" : "⏱ ~" + left + " min left"));
+  }
+  if (order.confirmed_by) {
+    metaChips.push(el("span", { class: "chip by" }, "✔ " + (order.confirmed_by === "Razorpay" ? "Paid online" : order.confirmed_by)));
   }
 
   return el("div", { class: "card" + (fresh ? " fresh" : "") },
@@ -269,31 +291,94 @@ async function loadHistory() {
     el("td", {}, (o.payment_mode ? paymentLabel(o.payment_mode) : "—")),
     el("td", {}, servingLabel(o)),
     el("td", {}, el("span", { class: "badge " + o.status }, o.status)),
+    el("td", {}, o.confirmed_by || "—"),
     el("td", {}, el("a", { href: "/bill/" + o.id, target: "_blank" }, "🖨"))));
   box.replaceChildren(el("table", {},
-    el("thead", {}, el("tr", {}, ["Order", "Time", "Customer", "Items", "Total", "Payment", "Type", "Status", "Bill"].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["Order", "Time", "Customer", "Items", "Total", "Payment", "Type", "Status", "Confirmed by", "Bill"].map((h) => el("th", {}, h)))),
     el("tbody", {}, rows)));
 }
 
 // ---------- menu manager ----------
 
+const MENU_FIELDS = [
+  ["name_en", "English name *"], ["name_hi", "Hindi name"], ["name_kn", "Kannada name"],
+  ["name_ta", "Tamil name"], ["name_te", "Telugu name"], ["category", "Category * (e.g. Tiffin, Drinks)"],
+  ["price", "Price ₹ *", "number"], ["stock", "Stock count (empty = unlimited)", "number"],
+  ["aliases", "Other spoken names, comma separated (e.g. dose, dosai)"],
+  ["addons", "Paid add-ons (e.g. Extra Cheese:15, Extra Chutney:10)"],
+  ["description", "Description (the agent reads this when asked \"what is it?\")"],
+  ["image_url", "Photo link (https://...) or upload below"],
+];
+
+function menuForm(item, onDone) {
+  const inputs = {};
+  const rows = MENU_FIELDS.map(([key, label, type]) => {
+    const input = el(key === "description" ? "textarea" : "input",
+                     { type: type || "text", value: item && item[key] != null ? item[key] : "" });
+    if (type === "number") input.min = "0";
+    inputs[key] = input;
+    return el("label", { class: "form-row" }, el("span", {}, label), input);
+  });
+  const veg = el("input", { type: "checkbox", checked: item ? !!item.veg : true });
+  const photo = el("input", { type: "file", accept: "image/jpeg,image/png,image/webp" });
+  const msg = el("p", { class: "form-msg" });
+  const save = el("button", { class: "btn", type: "submit" }, item ? "Save changes" : "➕ Add dish");
+  const form = el("form", { class: "menu-form" }, ...rows,
+    el("label", { class: "form-row inline" }, veg, el("span", {}, "Vegetarian")),
+    el("label", { class: "form-row" }, el("span", {}, "Upload photo (JPG/PNG/WEBP, under 2 MB)"), photo),
+    el("div", { class: "form-actions" }, save,
+       el("button", { class: "btn ghost-dark", type: "button", onclick: () => onDone(false) }, "Cancel")),
+    msg);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = { veg: veg.checked };
+    for (const [key] of MENU_FIELDS) body[key] = inputs[key].value.trim();
+    save.disabled = true;
+    try {
+      const saved = item
+        ? await api("/api/menu/" + item.id, sendJson("PATCH", body))
+        : await api("/api/menu", sendJson("POST", body));
+      if (photo.files[0]) {
+        const fd = new FormData();
+        fd.append("image", photo.files[0]);
+        await api("/api/menu/" + saved.id + "/image", { method: "POST", body: fd });
+      }
+      onDone(true);
+    } catch (err) {
+      msg.textContent = "⚠ " + err.message;
+      save.disabled = false;
+    }
+  });
+  return form;
+}
+
 async function loadMenu() {
   const items = await api("/api/menu");
   const box = document.getElementById("menuBox");
-  const nodes = [];
+  const addBox = el("div", { class: "add-box" });
+  const addBtn = el("button", { class: "btn", onclick: () => {
+    addBox.replaceChildren(menuForm(null, (changed) => { addBox.replaceChildren(addBtn); if (changed) loadMenu(); }));
+  } }, "➕ Add a new dish");
+  addBox.append(addBtn);
+  const nodes = [addBox];
   let lastCategory = null;
   for (const item of items) {
     if (item.category !== lastCategory) {
       nodes.push(el("h3", { class: "cat" }, item.category));
       lastCategory = item.category;
     }
-    const priceInput = el("input", { type: "number", min: "1", max: "5000", value: item.price });
-    nodes.push(el("div", { class: "menu-row" + (item.available ? "" : " off") },
-      el("span", { class: "name" }, item.name_en),
-      el("span", { class: "price-box" }, "₹", priceInput,
+    const priceInput = el("input", { type: "number", min: "1", max: "5000", value: item.price, title: "Price ₹" });
+    const stockInput = el("input", { type: "number", min: "0", placeholder: "∞", value: item.stock == null ? "" : item.stock,
+                                     title: "Stock count (empty = unlimited)" });
+    const editBox = el("div", { class: "edit-box" });
+    const row = el("div", { class: "menu-row" + (item.available ? "" : " off") },
+      item.image_url ? el("img", { class: "thumb", src: item.image_url, alt: "" }) : el("span", { class: "thumb none" }, "🍽"),
+      el("span", { class: "name" }, item.name_en,
+         item.addons ? el("small", {}, "+ " + item.addons.replace(/:(\d+)/g, " ₹$1")) : ""),
+      el("span", { class: "price-box" }, "₹", priceInput, "Stock", stockInput,
          el("button", { class: "btn small", onclick: async () => {
            try {
-             await api("/api/menu/" + item.id, sendJson("PATCH", { price: priceInput.value }));
+             await api("/api/menu/" + item.id, sendJson("PATCH", { price: priceInput.value, stock: stockInput.value }));
              loadMenu();
            } catch (err) { alert(err.message); }
          } }, "Save")),
@@ -304,7 +389,16 @@ async function loadMenu() {
            } catch (err) { alert(err.message); }
            loadMenu();
          } }),
-         item.available ? "Available" : "Sold out")));
+         item.available ? "Available" : "Sold out"),
+      el("span", { class: "row-actions" },
+         el("button", { class: "btn small", onclick: () => {
+           editBox.replaceChildren(menuForm(item, (changed) => { editBox.replaceChildren(); if (changed) loadMenu(); }));
+         } }, "✏ Edit"),
+         el("button", { class: "btn small danger", onclick: async () => {
+           if (!confirm("Remove " + item.name_en + " from the menu? Old bills keep it.")) return;
+           try { await api("/api/menu/" + item.id, { method: "DELETE" }); loadMenu(); } catch (err) { alert(err.message); }
+         } }, "Remove")));
+    nodes.push(row, editBox);
   }
   box.replaceChildren(...nodes);
 }
@@ -338,6 +432,7 @@ function hourName(h) {
 async function loadStats() {
   const s = await api("/api/stats");
   const a = await api("/api/analytics");
+  const feedback = await api("/api/feedback").catch(() => []);
   const langs = s.languages.length
     ? s.languages.map((l) => el("div", { class: "bar-row" },
         el("span", {}, LANG_NAMES[l.language] || l.language),
@@ -348,7 +443,9 @@ async function loadStats() {
     el("div", { class: "stat-cards" },
       el("div", { class: "stat" }, el("div", { class: "num" }, s.orders_today), el("div", { class: "label" }, "Orders today")),
       el("div", { class: "stat" }, el("div", { class: "num" }, "₹" + s.revenue_today), el("div", { class: "label" }, "Sales today")),
-      el("div", { class: "stat" }, el("div", { class: "num" }, "₹" + s.average_order), el("div", { class: "label" }, "Average order"))),
+      el("div", { class: "stat" }, el("div", { class: "num" }, "₹" + s.average_order), el("div", { class: "label" }, "Average order")),
+      el("div", { class: "stat" }, el("div", { class: "num" }, a.average_rating ? "★ " + a.average_rating : "—"),
+         el("div", { class: "label" }, "Customer rating (" + a.ratings + " reviews)"))),
     el("div", { class: "two" },
       el("div", {}, el("h3", {}, "Top dishes today"), barList(s.top_today)),
       el("div", {}, el("h3", {}, "Orders by language"), el("div", {}, langs)),
@@ -363,7 +460,13 @@ async function loadStats() {
       el("div", {}, el("h3", {}, "Busy hours (last 30 days)"),
          bars(a.busy_hours.map((h) => ({ name: hourName(h.hour) + " – " + hourName((h.hour + 1) % 24), value: h.orders })))),
       el("div", {}, el("h3", {}, "Customers"),
-         el("p", { class: "meta" }, a.repeat_customers + " of " + a.customers + " identified customers ordered more than once"))));
+         el("p", { class: "meta" }, a.repeat_customers + " of " + a.customers + " identified customers ordered more than once"))),
+    el("h3", { class: "section" }, "Latest customer feedback"),
+    feedback.length
+      ? el("ul", { class: "feedback" }, feedback.slice(0, 10).map((f) => el("li", {},
+          el("strong", {}, "★".repeat(f.rating) + "☆".repeat(5 - f.rating)), " #" + f.order_id +
+          (f.customer_name ? " · " + f.customer_name : ""), f.comment ? el("div", { class: "meta" }, "“" + f.comment + "”") : "")))
+      : el("div", { class: "empty" }, "No feedback yet"));
 }
 
 // ---------- tabs and refresh ----------

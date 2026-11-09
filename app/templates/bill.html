@@ -15,6 +15,7 @@
     th.r, td.r { text-align: right; }
     td { padding: 3px 0; vertical-align: top; }
     .note { font-size: .78rem; color: #444; }
+    .row { display: flex; justify-content: space-between; font-size: .9rem; margin: 2px 0; }
     .total { display: flex; justify-content: space-between; font-weight: bold; font-size: 1.05rem; }
     .void { text-align: center; color: #b00020; font-weight: bold; border: 2px solid #b00020; padding: 4px; margin-bottom: 8px; }
     button { display: block; margin: 14px auto 0; padding: 10px 20px; font-size: 1rem; cursor: pointer; }
@@ -30,7 +31,9 @@
     {% if cancelled %}<div class="void">CANCELLED</div>{% endif %}
     <h1>{{ name }}</h1>
     {% if address %}<p class="addr">{{ address }}</p>{% endif %}
+    {% if gstin %}<p class="addr">GSTIN: {{ gstin }}</p>{% endif %}
     <hr>
+    <p class="center"><strong>{{ "TAX INVOICE" if money.tax else "BILL" }}</strong> · {{ invoice_no }}</p>
     <p class="center">Order #{{ order.id }} · {{ where }}</p>
     <p class="center">{{ when }}</p>
     {% if order.customer_name %}<p class="center">Customer: <strong>{{ order.customer_name }}</strong>{% if order.customer_phone %} · {{ order.customer_phone }}{% endif %}</p>{% endif %}
@@ -41,7 +44,7 @@
       <tbody>
       {% for l in lines %}
         <tr>
-          <td>{{ l.name_en }}{% if l.notes %}<div class="note">↳ {{ l.notes }}</div>{% endif %}</td>
+          <td>{{ l.name_en }}{% if l.addons %}<div class="note">+ {{ l.addons }}</div>{% endif %}{% if l.notes %}<div class="note">↳ {{ l.notes }}</div>{% endif %}</td>
           <td class="r">{{ l.quantity }}</td>
           <td class="r">{{ l.unit_price }}</td>
           <td class="r">{{ l.quantity * l.unit_price }}</td>
@@ -50,7 +53,13 @@
       </tbody>
     </table>
     <hr>
-    <div class="total"><span>TOTAL</span><span>₹{{ order.total }}</span></div>
+    {% if money.tax %}
+    <div class="row"><span>Subtotal</span><span>₹{{ money.subtotal }}</span></div>
+    <div class="row"><span>CGST @ {{ "%g"|format(money.half_rate) }}%</span><span>₹{{ money.cgst }}</span></div>
+    <div class="row"><span>SGST @ {{ "%g"|format(money.half_rate) }}%</span><span>₹{{ money.sgst }}</span></div>
+    {% endif %}
+    <div class="total"><span>TOTAL</span><span>₹{{ money.total }}</span></div>
+    {% if order.payment_ref %}<p class="center note">Paid online · Ref {{ order.payment_ref }}</p>{% endif %}
     <hr>
     <p class="center">Thank you! Visit again.</p>
     <button onclick="window.print()">🖨 Print bill</button>

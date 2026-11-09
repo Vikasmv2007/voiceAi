@@ -4,17 +4,12 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request
 
 from app.db import get_db
-from app.staff import staff_only
-from app.services.texts import say
+from app.ratelimit import limit
+from app.services import kitchen
+from app.services.kitchen import AWAITING_PAYMENT, LIVE
+from app.staff import staff_name, staff_only
 
 bp = Blueprint("orders", __name__, url_prefix="/api")
-
-# Waiting for the staff to check the payment. Only the dashboard can move these to CONFIRMED.
-AWAITING_PAYMENT = ("AWAITING_CASH", "AWAITING_UPI")
-LIVE = AWAITING_PAYMENT + ("CONFIRMED", "PREPARING", "READY")
-# Which status can follow which (the kitchen moves an order forward step by step).
-NEXT = {"AWAITING_CASH": "CONFIRMED", "AWAITING_UPI": "CONFIRMED",
-        "CONFIRMED": "PREPARING", "PREPARING": "READY", "READY": "DELIVERED"}
 
 # "Today" means today in India (UTC+5:30), not in UTC.
 TODAY_IST = "date(o.confirmed_at, '+330 minutes') = date('now', '+330 minutes')"
@@ -36,13 +31,13 @@ def _load_orders(db, where, args, newest_first=False, limit=100):
     ids = [r["id"] for r in rows]
     marks = ",".join("?" * len(ids))
     items = db.execute(
-        f"""SELECT oi.order_id, oi.quantity, oi.notes, m.name_en
+        f"""SELECT oi.order_id, oi.quantity, oi.notes, oi.addons, m.name_en
             FROM order_items oi JOIN menu_items m ON m.id = oi.menu_item_id
             WHERE oi.order_id IN ({marks}) ORDER BY oi.id""", ids).fetchall()
     by_order = {}
     for it in items:
         by_order.setdefault(it["order_id"], []).append(
-            {"name": it["name_en"], "quantity": it["quantity"], "notes": it["notes"]})
+            {"name": it["name_en"], "quantity": it["quantity"], "notes": it["notes"], "addons": it["addons"]})
     return [{
         "id": r["id"],
         "status": r["status"],
@@ -56,6 +51,10 @@ def _load_orders(db, where, args, newest_first=False, limit=100):
         "payment_mode": r["payment_mode"] if "payment_mode" in r.keys() else None,
         "confirmed_at": _iso(r["confirmed_at"]),
         "created_at": _iso(r["created_at"]),
+        "confirmed_by": r["confirmed_by"],
+        "eta_minutes": r["eta_minutes"],
+        "subtotal": r["subtotal"],
+        "tax": r["tax"],
         "items": by_order.get(r["id"], []),
     } for r in rows]
 
@@ -78,23 +77,69 @@ def order_history():
 @staff_only
 def change_status(order_id):
     new_status = (request.get_json(silent=True) or {}).get("status", "")
-    db = get_db()
-    row = db.execute("SELECT status FROM orders WHERE id = ?", (order_id,)).fetchone()
+    ok, error = kitchen.change_status(get_db(), order_id, new_status, by=staff_name() or "staff")
+    if not ok:
+        return jsonify({"error": error}), 404 if error == "Order not found" else 400
+    return jsonify({"id": order_id, "status": new_status})
+
+
+def _own_order(order_id):
+    """The customer's own order: the browser must send the session id that placed it."""
+    data = request.get_json(silent=True) or {}
+    session_id = str(data.get("session_id") or "")
+    row = get_db().execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if not row or not session_id or row["session_id"] != session_id:
+        return None, data
+    return row, data
+
+
+@bp.route("/orders/<int:order_id>/customer-cancel", methods=["POST"])
+@limit("customer", "RATE_LIMIT_TURN")
+def customer_cancel(order_id):
+    """A customer may cancel only while the staff have not confirmed the payment yet."""
+    row, _ = _own_order(order_id)
     if not row:
         return jsonify({"error": "Order not found"}), 404
-    current = row["status"]
-    allowed = NEXT.get(current) == new_status or (new_status == "CANCELLED" and current in LIVE)
-    if not allowed:
-        return jsonify({"error": f"Cannot change {current} to {new_status}"}), 400
-    # The staff have the money (cash collected / UPI payment seen): the order is
-    # confirmed now, so the bill and history timestamps are correct.
-    if current in AWAITING_PAYMENT and new_status == "CONFIRMED":
-        db.execute("UPDATE orders SET status = ?, confirmed_at = CURRENT_TIMESTAMP WHERE id = ?",
-                   (new_status, order_id))
-    else:
-        db.execute("UPDATE orders SET status = ? WHERE id = ?", (new_status, order_id))
+    if row["status"] not in AWAITING_PAYMENT:
+        return jsonify({"error": "This order is already confirmed. Please ask the staff."}), 400
+    if row["payment_ref"]:
+        return jsonify({"error": "You have already paid online. Please ask the staff for a refund."}), 400
+    db = get_db()
+    db.execute("UPDATE orders SET status = 'CANCELLED' WHERE id = ?", (order_id,))
     db.commit()
-    return jsonify({"id": order_id, "status": new_status})
+    return jsonify({"id": order_id, "status": "CANCELLED"})
+
+
+@bp.route("/orders/<int:order_id>/feedback", methods=["POST"])
+@limit("customer", "RATE_LIMIT_TURN")
+def feedback(order_id):
+    """1-5 stars (and a short comment) after the order was delivered. One per order."""
+    row, data = _own_order(order_id)
+    if not row:
+        return jsonify({"error": "Order not found"}), 404
+    if row["status"] not in ("READY", "DELIVERED"):
+        return jsonify({"error": "You can rate the order after you receive it."}), 400
+    try:
+        rating = int(data.get("rating"))
+    except (TypeError, ValueError):
+        rating = 0
+    if not 1 <= rating <= 5:
+        return jsonify({"error": "Rating must be 1 to 5"}), 400
+    comment = str(data.get("comment") or "").strip()[:300]
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO feedback (order_id, rating, comment) VALUES (?, ?, ?)",
+               (order_id, rating, comment))
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/feedback")
+@staff_only
+def feedback_list():
+    rows = get_db().execute(
+        "SELECT f.order_id, f.rating, f.comment, f.created_at, o.customer_name FROM feedback f"
+        " JOIN orders o ON o.id = f.order_id ORDER BY f.created_at DESC LIMIT 50").fetchall()
+    return jsonify([{**dict(r), "created_at": _iso(r["created_at"])} for r in rows])
 
 
 @bp.route("/stats")
@@ -156,30 +201,22 @@ def analytics():
     cust = db.execute(
         f"SELECT COUNT(*) AS customers, COALESCE(SUM(n >= 2), 0) AS repeat_customers FROM ("
         f"SELECT COUNT(*) AS n FROM orders o WHERE {COUNTED} AND o.customer_id IS NOT NULL GROUP BY o.customer_id)").fetchone()
+    rating = db.execute("SELECT COUNT(*) AS n, AVG(rating) AS avg FROM feedback").fetchone()
     return jsonify({"days": days, "busy_hours": busy, "top_week": top_week, "types": types,
-                    "customers": cust["customers"], "repeat_customers": cust["repeat_customers"]})
+                    "customers": cust["customers"], "repeat_customers": cust["repeat_customers"],
+                    "ratings": rating["n"], "average_rating": round(rating["avg"], 1) if rating["avg"] else None})
 
 
 @bp.route("/orders/<int:order_id>/track")
 def track_order(order_id):
     """Used by the customer's page to hear "your order is ready". Returns the status and a sentence in their language."""
-    row = get_db().execute("SELECT status, confirmed_at, order_type, table_no FROM orders WHERE id = ?", (order_id,)).fetchone()
-    if not row or (not row["confirmed_at"] and row["status"] not in AWAITING_PAYMENT):
+    db = get_db()
+    row = db.execute("SELECT * FROM orders WHERE id = ?", (order_id,)).fetchone()
+    if not row or (not row["confirmed_at"] and row["status"] not in AWAITING_PAYMENT + ("CANCELLED",)):
         return jsonify({"error": "Order not found"}), 404
-    lang = request.args.get("lang", "en-IN").split("-")[0]
-    if lang not in ("en", "hi", "kn"):
-        lang = "en"
-    key = {
-        "AWAITING_CASH": "order_awaiting_cash",
-        "AWAITING_UPI": "order_awaiting_upi",
-        "CONFIRMED": "order_confirmed_kitchen",
-        "PREPARING": "order_preparing",
-        "READY": "order_ready",
-        "CANCELLED": "order_cancelled_kitchen",
-    }.get(row["status"])
-    if row["status"] == "READY" and row["order_type"] == "takeaway":
-        key = "ready_pickup"
-    elif row["status"] == "READY" and row["table_no"]:
-        key = "ready_table"
-    message = say(lang, key, id=order_id, table=row["table_no"] or "") if key else ""
-    return jsonify({"status": row["status"], "message": message})
+    lang = request.args.get("lang") or row["language"] or "en-IN"
+    order = dict(row)
+    order["language"] = lang
+    rated = db.execute("SELECT 1 FROM feedback WHERE order_id = ?", (order_id,)).fetchone() is not None
+    return jsonify({"status": row["status"], "message": kitchen.customer_message(order),
+                    "eta_minutes": row["eta_minutes"], "paid_online": bool(row["payment_ref"]), "rated": rated})

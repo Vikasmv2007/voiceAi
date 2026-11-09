@@ -8,6 +8,8 @@ How a call flows (the SAME order engine as the website, so the same rules apply)
   After the caller says yes to the read-back, the order is placed and the call ends.
 
 Phone orders are always takeaway. The caller's number is the customer id (for "same as last time").
+Payment: with Razorpay set up the caller gets a payment link by SMS and the order is confirmed when it
+is paid; without it they pay at pickup and the staff confirm it then.
 Switched off unless TWILIO_AUTH_TOKEN is set in .env (or PHONE_DEV=1 for local testing).
 """
 import base64
@@ -21,15 +23,17 @@ import requests
 from flask import Blueprint, Response, abort, request
 
 from app import config
-from app.services import gnani_stt, gnani_tts, order_engine
+from app.services import gnani_stt, gnani_tts, order_engine, payments
 from app.services.texts import say
 
 bp = Blueprint("phone", __name__, url_prefix="/phone")
 
-LANGS = {"1": "en-IN", "2": "hi-IN", "3": "kn-IN"}
+LANGS = {"1": "en-IN", "2": "hi-IN", "3": "kn-IN", "4": "ta-IN", "5": "te-IN"}
 LANG_PROMPTS = [("en-IN", "For English, press 1."),
                 ("hi-IN", "हिन्दी के लिए, 2 दबाएँ।"),
-                ("kn-IN", "ಕನ್ನಡಕ್ಕಾಗಿ, 3 ಒತ್ತಿರಿ.")]
+                ("kn-IN", "ಕನ್ನಡಕ್ಕಾಗಿ, 3 ಒತ್ತಿರಿ."),
+                ("ta-IN", "தமிழுக்கு, 4 அழுத்தவும்."),
+                ("te-IN", "తెలుగు కోసం, 5 నొక్కండి.")]
 MAX_TURNS = 12              # hang up after this many back-and-forths
 AUDIO = {}                  # token -> (bytes, mime): voice clips waiting for Twilio to fetch them
 
@@ -91,7 +95,8 @@ def _fetch_recording(url):
 @bp.route("/incoming", methods=["POST"])
 def incoming():
     _guard()
-    prompts = "".join(_play(text, lang) for lang, text in LANG_PROMPTS)
+    # Only offer languages that have a Gnani voice (Tamil/Telugu need GNANI_VOICE_TA / _TE in .env).
+    prompts = "".join(_play(text, lang) for lang, text in LANG_PROMPTS if lang in gnani_tts.VOICES)
     gather = (f'<Gather input="dtmf" numDigits="1" timeout="6" method="POST" '
               f'action={quoteattr(_base() + "/phone/language")}>{prompts}</Gather>')
     # No key pressed -> carry on in English.
@@ -102,6 +107,8 @@ def incoming():
 def language():
     _guard()
     lang = LANGS.get(request.values.get("Digits", "1"), "en-IN")
+    if lang not in gnani_tts.VOICES:
+        lang = "en-IN"
     return _twiml(_play(say(lang.split("-")[0], "greet"), lang), _record(lang, 0))
 
 
@@ -109,7 +116,7 @@ def language():
 def turn():
     _guard()
     lang = request.args.get("lang", "en-IN")
-    if lang not in LANGS.values():
+    if lang not in LANGS.values() or lang not in gnani_tts.VOICES:
         lang = "en-IN"
     code = lang.split("-")[0]
     try:
@@ -140,7 +147,11 @@ def turn():
 
     result = order_engine.handle_turn(
         "call:" + call_sid, text, lang, customer_id=("tel:" + caller) if caller else None,
-        channel="phone", serving={"type": "takeaway", "table": None})
+        channel="phone", serving={"type": "takeaway", "table": None},
+        # A caller cannot scan a QR: with Razorpay they get a payment link by SMS, otherwise they pay at pickup.
+        payment_mode="upi" if payments.enabled() else "cash")
+    if result.get("language") in gnani_tts.VOICES:
+        lang = result["language"]
     if result["submitted"]:
         return _twiml(_play(result["reply"], lang), _play(say(code, "bye"), lang), "<Hangup/>")
     return _twiml(_play(result["reply"], lang), _record(lang, n + 1))

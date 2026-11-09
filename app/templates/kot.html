@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KOT #{{ order.id }}</title>
+  <style>
+    @page { size: 80mm auto; margin: 3mm; }
+    body { font-family: "Courier New", monospace; margin: 0; padding: 8px; color: #000; background: #fff; }
+    .kot { width: 72mm; margin: 0 auto; }
+    h1 { font-size: 1.6rem; text-align: center; margin: 0; }
+    .big { font-size: 1.15rem; text-align: center; font-weight: bold; margin: 4px 0; }
+    .small { font-size: .85rem; text-align: center; margin: 2px 0; }
+    hr { border: 0; border-top: 2px dashed #000; margin: 8px 0; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { font-size: 1.15rem; font-weight: bold; margin: 6px 0; }
+    .note { font-size: .95rem; font-weight: normal; padding-left: 14px; }
+    button { display: block; margin: 14px auto 0; padding: 10px 20px; font-size: 1rem; cursor: pointer; }
+    @media print { button { display: none; } }
+  </style>
+</head>
+<body onload="if (location.search.includes('print=1')) window.print()">
+  <div class="kot">
+    <h1>KOT #{{ order.id }}</h1>
+    <p class="big">{{ where }}</p>
+    <p class="small">{{ when }}{% if order.customer_name %} · {{ order.customer_name }}{% endif %}</p>
+    <hr>
+    <ul>
+    {% for l in lines %}
+      <li>{{ l.quantity }} × {{ l.name_en }}
+        {% if l.addons %}<div class="note">+ {{ l.addons }}</div>{% endif %}
+        {% if l.notes %}<div class="note">↳ {{ l.notes }}</div>{% endif %}
+      </li>
+    {% endfor %}
+    </ul>
+    <hr>
+    <button onclick="window.print()">🖨 Print KOT</button>
+  </div>
+</body>
+</html>

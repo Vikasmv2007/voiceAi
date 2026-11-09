@@ -16,30 +16,35 @@ from app.services import menu_matcher as mm
 CONFIRM = ["yes", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "correct",
            "go ahead", "place the order", "proceed", "haan", "han", "haa", "ji",
            "theek hai", "thik hai", "हाँ", "हां", "जी", "ठीक है", "कन्फर्म", "पक्का",
-           "ಹೌದು", "ಸರಿ", "ಹೂಂ", "ಕನ್ಫರ್ಮ್", "houdu", "sari"]
-DENY = ["no", "nope", "nahi", "nahin", "नहीं", "नही", "ना", "ಇಲ್ಲ", "ಬೇಡ"]
+           "ಹೌದು", "ಸರಿ", "ಹೂಂ", "ಕನ್ಫರ್ಮ್", "houdu", "sari",
+           "ஆமா", "ஆம்", "சரி", "சரிங்க", "உறுதி", "aama", "seri",
+           "అవును", "సరే", "కన్ఫర్మ్", "avunu", "sare"]
+DENY = ["no", "nope", "nahi", "nahin", "नहीं", "नही", "ना", "ಇಲ್ಲ", "ಬೇಡ",
+        "இல்லை", "வேண்டாம்", "illa", "vendam", "లేదు", "వద్దు", "ledu", "vaddu"]
 DONE = ["that's all", "thats all", "that is all", "that is it", "that's it", "thats it",
         "nothing else", "nothing more", "no more", "that will be all", "bas", "बस",
-        "ಅಷ್ಟೇ", "ಸಾಕು"]
+        "ಅಷ್ಟೇ", "ಸಾಕು", "அவ்வளவு தான்", "அவ்வளவுதான்", "போதும்", "podhum", "అంతే", "చాలు", "ante", "chaalu"]
 REMOVE = ["remove", "delete", "take off", "take out", "don't want", "dont want", "cancel",
           "hata", "hatao", "nikal", "nikalo", "हटा", "हटाओ", "निकाल", "निकालो",
-          "ಬೇಡ", "ತೆಗೆ", "ತೆಗೆದು", "beda"]
+          "ಬೇಡ", "ತೆಗೆ", "ತೆಗೆದು", "beda", "நீக்கு", "வேண்டாம்", "తీసేయి", "తీసెయ్యి", "వద్దు"]
 MODIFY = ["change", "make it", "make that", "instead", "update", "set it", "only",
           "badal", "बदल", "ಬದಲಾಯಿಸಿ", "ಬದಲು"]
 CANCEL_ORDER = ["cancel order", "cancel my order", "cancel the order", "cancel everything",
-                "cancel all", "start over", "clear order", "कैंसिल", "ऑर्डर रद्द", "ರದ್ದು"]
-PRICE = ["price", "cost", "rate", "how much", "कीमत", "दाम", "ಬೆಲೆ", "ದರ"]
+                "cancel all", "start over", "clear order", "कैंसिल", "ऑर्डर रद्द", "ರದ್ದು", "ரத்து", "రద్దు"]
+PRICE = ["price", "cost", "rate", "how much", "कीमत", "दाम", "ಬೆಲೆ", "ದರ", "விலை", "எவ்வளவு", "ధర", "ఎంత"]
 TOTAL = ["total", "bill", "amount", "kitna", "kitne", "कितना", "कितने", "कुल", "बिल",
-         "ಎಷ್ಟು", "ಒಟ್ಟು", "ಬಿಲ್"]
+         "ಎಷ್ಟು", "ಒಟ್ಟು", "ಬಿಲ್", "மொத்தம்", "பில்", "మొత్తం", "బిల్"]
 MENU = ["menu", "what do you have", "what all", "what is available", "what's available",
         "whats available", "what can i order", "options", "recommend", "suggest",
-        "popular", "special", "मेनू", "मेन्यू", "क्या है", "क्या मिलेगा", "ಮೆನು", "ಏನಿದೆ"]
-AVAILABLE = ["do you have", "is there", "available", "hai kya", "है क्या", "ಇದೆಯಾ", "ಇದೆಯೇ"]
+        "popular", "special", "मेनू", "मेन्यू", "क्या है", "क्या मिलेगा", "ಮೆನು", "ಏನಿದೆ",
+        "மெனு", "என்ன இருக்கு", "మెనూ", "ఏమున్నాయి", "ఏం ఉంది"]
+AVAILABLE = ["do you have", "is there", "available", "hai kya", "है क्या", "ಇದೆಯಾ", "ಇದೆಯೇ",
+             "இருக்கா", "கிடைக்குமா", "ఉందా", "దొరుకుతుందా"]
 REPEAT = ["repeat", "say that again", "say again", "once more", "pardon", "come again",
-          "दोहराओ", "फिर से", "ಮತ್ತೆ ಹೇಳಿ", "ಇನ್ನೊಮ್ಮೆ"]
+          "दोहराओ", "फिर से", "ಮತ್ತೆ ಹೇಳಿ", "ಇನ್ನೊಮ್ಮೆ", "மீண்டும் சொல்லுங்கள்", "திரும்ப சொல்லுங்க", "మళ్ళీ చెప్పండి"]
 # Words that mean "place my order now" (never "yes, add that drink").
 PLACE_ORDER = ["confirm", "place the order", "place my order", "proceed", "check out", "checkout",
-               "कन्फर्म", "ಕನ್ಫರ್ಮ್"]
+               "कन्फर्म", "ಕನ್ಫರ್ಮ್", "உறுதி", "కన్ఫర్మ్"]
 REORDER = ["same as last time", "same as before", "same as my last", "my usual", "the usual", "usual order",
            "last order", "previous order", "order again", "reorder", "re-order", "same order",
            "same again", "repeat my order", "repeat my last", "repeat the last",
@@ -47,7 +52,13 @@ REORDER = ["same as last time", "same as before", "same as my last", "my usual",
            "पिछली बार", "पिछला ऑर्डर", "पिछले जैसा", "वही ऑर्डर", "फिर से वही",
            "ಹಿಂದಿನ ಆರ್ಡರ್", "ಹಿಂದಿನ ಬಾರಿ", "ಕಳೆದ ಬಾರಿ", "ಅದೇ ಆರ್ಡರ್"]
 GREET = ["hello", "hi", "hey", "namaste", "namaskara", "namaskar", "good morning",
-         "good evening", "good afternoon", "नमस्ते", "ನಮಸ್ಕಾರ"]
+         "good evening", "good afternoon", "नमस्ते", "ನಮಸ್ಕಾರ", "வணக்கம்", "vanakkam", "నమస్కారం", "namaskaram"]
+# "Is masala dosa spicy?", "How sweet is kesari?"
+DESCRIBE_QUESTION = r"^(?:is|are|how|does|do)\b.*\b(?:spicy|sweet|hot|veg|vegetarian|vegan|oily|healthy)\b"
+# "What is pongal?", "Is it spicy?"
+DESCRIBE = ["what is", "what's", "whats", "what are", "tell me about", "describe", "ingredients", "made of",
+            "is it spicy", "is it veg", "kya hota", "क्या होता", "क्या है", "बताइए", "ಅಂದರೆ ಏನು", "ಏನು ಇದು",
+            "என்றால் என்ன", "என்ன அது", "అంటే ఏమిటి", "ఏమిటి"]
 
 # Small English notes like "no onion", "extra chutney", "less spicy".
 NOTE_PATTERNS = [
@@ -61,7 +72,7 @@ NOTE_PATTERNS = [
 def parse_rules(text, menu, lang="en"):
     t = mm.clean(text)
     result = {"intent": "unknown", "items": [], "ambiguous": [],
-              "notes": [], "bare_quantity": None, "filter": None}
+              "notes": [], "bare_quantity": None, "filter": None, "addons": []}
     if not t:
         return result
 
@@ -80,17 +91,39 @@ def parse_rules(text, menu, lang="en"):
                                         "quantity": qty, "explicit": explicit})
     has_items = bool(result["items"] or result["ambiguous"])
 
-    # 2. Small notes such as "no onion".
-    # Each note belongs to the dish mentioned just before it ("dosa with no onion").
     dish_mentions = [m for m in mentions if m["kind"] == "item"]
+
+    def owner_of(start, end):
+        """A note / add-on belongs to the dish said just before it, else the one just after."""
+        before = [d for d in dish_mentions if d["end"] <= start]
+        after = [d for d in dish_mentions if d["start"] >= end]
+        owner = before[-1] if before else after[0] if after else None
+        return owner["item"] if owner else None
+
+    # 2. Paid add-ons from the menu ("masala dosa with extra cheese").
+    addon_spans = []
+    for item in menu:
+        for name, price in mm.parse_addons(item):
+            for s_, e_ in mm.find_all(t, mm.clean(name)):
+                owner = owner_of(s_, e_)
+                result["addons"].append({"item_id": owner["id"] if owner else None, "name": name, "price": price,
+                                         "menu_item_id": item["id"]})
+                addon_spans.append((s_, e_))
+    # Keep only add-ons that belong to the dish they were said with (or to no dish yet).
+    result["addons"] = [a for a in result["addons"] if a["item_id"] in (None, a["menu_item_id"])]
+    seen = set()
+    result["addons"] = [a for a in result["addons"]
+                        if (a["name"], a["item_id"]) not in seen and not seen.add((a["name"], a["item_id"]))]
+
+    # 3. Small free notes such as "no onion" (not the paid add-ons above).
     for pattern in NOTE_PATTERNS:
         for m in re.finditer(pattern, t):
-            before = [d for d in dish_mentions if d["end"] <= m.start()]
-            after = [d for d in dish_mentions if d["start"] >= m.end()]
-            owner = (before[-1] if before else after[0] if after else None)
-            result["notes"].append({"text": m.group(0), "item_id": owner["item"]["id"] if owner else None})
+            if any(m.start() < e_ and m.end() > s_ for s_, e_ in addon_spans):
+                continue
+            owner = owner_of(m.start(), m.end())
+            result["notes"].append({"text": m.group(0), "item_id": owner["id"] if owner else None})
 
-    flt = detect_filter(t)
+    flt = detect_filter(t, menu)
 
     # 3. What does the customer want to DO?
     nums = mm.number_tokens(t, lang)
@@ -111,8 +144,12 @@ def parse_rules(text, menu, lang="en"):
             result["intent"] = "price"
         elif mm.contains(t, AVAILABLE):
             result["intent"] = "availability"
+        elif not result["addons"] and (mm.contains(t, DESCRIBE) or re.match(DESCRIBE_QUESTION, t)):
+            result["intent"] = "describe"
         else:
             result["intent"] = "order"
+    elif result["addons"]:
+        result["intent"] = "addon"
     elif result["notes"]:
         result["intent"] = "note"
     elif flt:
@@ -147,10 +184,14 @@ CHEAP_WORDS = ["cheap", "cheapest", "budget", "affordable", "सस्ता", "
 PRICE_LIMIT = re.compile(r"(?:under|below|less than|within|upto|up to|maximum|max)\s*(?:₹|rs|rupees)?\s*(\d{1,4})")
 
 
-def detect_filter(t):
+def detect_filter(t, menu=()):
     flt = {"category": None, "max_price": None, "veg": None, "cheap": False}
     for category, words in CATEGORY_WORDS.items():
         if mm.contains(t, words):
+            flt["category"] = category
+    # Categories the owner added in the menu editor ("Chinese", "Juices") work too.
+    for category in {m["category"] for m in menu} - set(CATEGORY_WORDS):
+        if category and mm.contains(t, [category]):
             flt["category"] = category
     if mm.contains(t, NON_VEG_WORDS):
         flt["veg"] = False
@@ -168,11 +209,11 @@ def detect_filter(t):
 # ---------- dine-in / takeaway / table number ----------
 TAKEAWAY_WORDS = ["takeaway", "take away", "take-away", "takeout", "parcel", "to go", "carry out", "pack it",
                   "पार्सल", "टेकअवे", "टेक अवे", "ले जाना", "ले जाऊंगा", "ले जाऊँगा",
-                  "ಪಾರ್ಸೆಲ್", "ಪಾರ್ಸಲ್", "ಟೇಕ್ ಅವೇ", "ಟೇಕ್ಅವೇ"]
+                  "ಪಾರ್ಸೆಲ್", "ಪಾರ್ಸಲ್", "ಟೇಕ್ ಅವೇ", "ಟೇಕ್ಅವೇ", "பார்சல்", "పార్సిల్", "పార్శిల్"]
 DINE_WORDS = ["dine in", "dine-in", "dining", "eat here", "eating here", "sit here", "for here", "here", "inside",
               "यहीं", "यहाँ", "यहां", "अंदर", "डाइन इन",
-              "ಇಲ್ಲೇ", "ಇಲ್ಲಿ", "ಒಳಗೆ", "ಡೈನ್ ಇನ"]
-TABLE_WORDS = ["table", "tbl", "टेबल", "टेबिल", "ಟೇಬಲ್"]
+              "ಇಲ್ಲೇ", "ಇಲ್ಲಿ", "ಒಳಗೆ", "ಡೈನ್ ಇನ", "இங்கே", "இங்க", "ఇక్కడే", "ఇక్కడ"]
+TABLE_WORDS = ["table", "tbl", "टेबल", "टेबिल", "ಟೇಬಲ್", "டேபிள்", "టేబుల్"]
 TABLE_FILLER = {"number", "no", "num", "is", "#", "नंबर", "संख्या", "ಸಂಖ್ಯೆ", "नं"}
 
 
@@ -211,6 +252,8 @@ NAME_PREFIXES = [
     r"^(?:my name is|i am|i'm|this is|call me)\s+",
     r"^(?:mera naam|naam|hamara naam|मेरा नाम|हमारा नाम|नाम)\s+",
     r"^(?:nanna hesaru|hesaru|ನನ್ನ ಹೆಸರು|ಹೆಸರು)\s+",
+    r"^(?:en peyar|en peru|என் பெயர்|என் பேரு|என் பெயர்)\s+",
+    r"^(?:naa peru|నా పేరు)\s+",
 ]
 
 NAME_MAP = {
@@ -225,9 +268,11 @@ NAME_MAP = {
 NOT_NAMES = {"done", "ready", "fine", "good", "ok", "okay", "finished", "hungry", "here", "back", "sorry",
              "not sure", "thinking", "waiting", "full"}
 
-CASH_WORDS = ["cash", "nakad", "rokhad", "nagadu", "नकद", "ನಗದು", "pay cash", "by cash", "cash payment", "cash on delivery"]
+CASH_WORDS = ["cash", "nakad", "rokhad", "nagadu", "नकद", "ನಗದು", "pay cash", "by cash", "cash payment", "cash on delivery",
+              "ரொக்கம்", "கேஷ்", "నగదు", "క్యాష్"]
 UPI_WORDS = ["upi", "qr", "qr code", "scanner", "scan", "online", "gpay", "google pay",
-             "phonepe", "paytm", "bhim", "cashless", "क्यूआर", "यूपीआई", "ಯುಪಿಐ", "ಸ್ಕ್ಯಾನ್", "ಕ್ಯೂಆರ್"]
+             "phonepe", "paytm", "bhim", "cashless", "क्यूआर", "यूपीआई", "ಯುಪಿಐ", "ಸ್ಕ್ಯಾನ್", "ಕ್ಯೂಆರ್",
+             "யுபிஐ", "ஸ்கேன்", "యూపీఐ", "స్కాన్"]
 
 
 def explicit_name(text):
@@ -245,7 +290,7 @@ def extract_name(text):
     t = text.strip()
     for prefix in NAME_PREFIXES:
         t = re.sub(prefix, "", t, flags=re.IGNORECASE).strip()
-    t = re.sub(r"\s+(?:hai|ide|please|sir|madam|है|ಇದೆ)$", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"\s+(?:hai|ide|please|sir|madam|है|ಇದೆ|தான்|ங்க)$", "", t, flags=re.IGNORECASE).strip()
     if t in NAME_MAP:
         return NAME_MAP[t]
     words = t.split()
@@ -285,6 +330,25 @@ def detect_payment(text):
     return None
 
 
+# ---------- which language is this written in? ----------
+SCRIPTS = [("hi", 0x0900, 0x097F), ("te", 0x0C00, 0x0C7F), ("kn", 0x0C80, 0x0CFF), ("ta", 0x0B80, 0x0BFF)]
+
+
+def detect_language(text):
+    """'hi' / 'kn' / 'ta' / 'te' when most letters are in that script, else None (Latin text:
+    we cannot tell Hinglish from English, so the selected language is kept)."""
+    counts = {}
+    for ch in text or "":
+        code = ord(ch)
+        for lang, low, high in SCRIPTS:
+            if low <= code <= high:
+                counts[lang] = counts.get(lang, 0) + 1
+    if not counts:
+        return None
+    lang, n = max(counts.items(), key=lambda kv: kv[1])
+    return lang if n >= 2 else None
+
+
 # ---------- the function the rest of the app calls ----------
 def parse(text, menu, lang="en", context=None):
     """Rules first (fast, free). The LLM helps only when configured and needed.
@@ -296,5 +360,6 @@ def parse(text, menu, lang="en", context=None):
         # In "always" mode, if the LLM gave up but the rules understood, keep the rules.
         if smart and not (smart["intent"] == "unknown" and rules["intent"] != "unknown"):
             smart["source"] = "llm"
+            smart.setdefault("addons", rules["addons"])       # add-on prices always come from the menu
             return smart
     return rules
