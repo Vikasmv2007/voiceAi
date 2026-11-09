@@ -1,3 +1,4 @@
+"""Creates the Flask app: settings, database upgrade, pages and API blueprints."""
 import os
 import secrets
 from datetime import timedelta

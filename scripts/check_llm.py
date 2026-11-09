@@ -1,4 +1,4 @@
-"""Checks your LLM settings from .env.   Run:  python -m scripts.test_llm"""
+"""Checks your LLM settings from .env.   Run:  python -m scripts.check_llm"""
 import sqlite3
 
 from app import config

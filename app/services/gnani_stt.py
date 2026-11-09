@@ -1,3 +1,4 @@
+"""Turns the customer's recorded speech into text using Gnani Prisma."""
 import time
 
 import requests

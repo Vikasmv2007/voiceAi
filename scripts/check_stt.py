@@ -1,4 +1,11 @@
-import os, sys, requests
+"""Checks your Gnani speech-to-text key with an audio file.
+
+Run:  python -m scripts.check_stt path/to/audio.wav [language, e.g. hi-IN]
+"""
+import os
+import sys
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()

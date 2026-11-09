@@ -1,3 +1,4 @@
+"""Starts the app on your computer:  python run.py   (on a server use gunicorn, see README)."""
 import socket
 import sys
 
